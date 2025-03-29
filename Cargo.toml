@@ -1,0 +1,21 @@
+[package]
+name = "libweave"
+version = "0.1.0"
+edition = "2021"
+
+authors = ["Miroslav Gavrilov"]
+description = "Weave: structured programming"
+license = "MIT"
+homepage = "https://github.com/gavrilovmiroslav/weave"
+repository = "https://github.com/gavrilovmiroslav/weave"
+readme = "README.md"
+
+[lib]
+crate-type = [
+    "staticlib",
+    "lib",
+]
+
+[dependencies]
+multimap = "0.10.0"
+id-arena = { version = "2", features = [] }
