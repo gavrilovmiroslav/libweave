@@ -1,7 +1,6 @@
 # libweave
 ## A library for structured programming
-
-### Table of Contents
+<img alt="GitHub Actions Workflow Status" src="https://img.shields.io/github/actions/workflow/status/gavrilovmiroslav/libweave/rust.yml">
 
 ### About
 
