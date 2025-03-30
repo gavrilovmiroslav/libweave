@@ -389,7 +389,7 @@ pub trait Weaveable<W> {
     /// let d = weave.new_arrow(b, a).unwrap_or(weave.bottom());
     /// assert_eq!(weave.get_connections(a, b), vec![ c ]);
     /// let e = weave.new_arrow(a, b).unwrap_or(weave.bottom());
-    /// assert_eq!(weave.get_connections(a, b), vec![ c, e ]);
+    /// assert_eq!(weave.get_connections(a, b).sort(), vec![ c, e ]);
     /// ```
     fn get_connections(&self, source: usize, target: usize) -> Vec<usize>;
 
@@ -415,7 +415,7 @@ pub trait Weaveable<W> {
     /// let c = weave.new_arrow(a, b).unwrap_or(weave.bottom());
     /// let d = weave.new_arrow(b, a).unwrap_or(weave.bottom());
     /// let e = weave.new_arrow(a, b).unwrap_or(weave.bottom());
-    /// assert_eq!(weave.get_connections_from(a), vec![ c, e ]);
+    /// assert_eq!(weave.get_connections_from(a).sort(), vec![ c, e ]);
     /// ```
     fn get_connections_from(&self, source: usize) -> Vec<usize>;
 
@@ -441,7 +441,7 @@ pub trait Weaveable<W> {
     /// let c = weave.new_arrow(a, b).unwrap_or(weave.bottom());
     /// let d = weave.new_arrow(b, a).unwrap_or(weave.bottom());
     /// let e = weave.new_arrow(a, b).unwrap_or(weave.bottom());
-    /// assert_eq!(weave.get_connections_to(b), vec![ c, e ]);
+    /// assert_eq!(weave.get_connections_to(b).sort(), vec![ c, e ]);
     /// ```
     fn get_connections_to(&self, target: usize) -> Vec<usize>;
 
@@ -468,7 +468,7 @@ pub trait Weaveable<W> {
     /// weave.new_arrow(a, b).unwrap_or(weave.bottom());
     /// weave.new_arrow(a, c).unwrap_or(weave.bottom());
     /// weave.new_arrow(d, a).unwrap_or(weave.bottom());
-    /// assert_eq!(weave.get_neighbors(a), vec![ b, c ]);
+    /// assert_eq!(weave.get_neighbors(a).sort(), vec![ b, c ]);
     /// ```
     fn get_neighbors(&self, index: usize) -> Vec<usize>;
 
@@ -515,7 +515,7 @@ pub trait Weaveable<W> {
     /// let a = weave.new_knot();
     /// let b = weave.new_tether(a).unwrap_or(weave.bottom());
     /// let c = weave.new_tether(a).unwrap_or(weave.bottom());
-    /// assert_eq!(weave.get_tethers(a), vec![ b, c ]);
+    /// assert_eq!(weave.get_tethers(a).sort(), vec![ b, c ]);
     /// ```
     fn get_tethers(&self, index: usize) -> Vec<usize>;
 
@@ -537,7 +537,7 @@ pub trait Weaveable<W> {
     /// let a = weave.new_knot();
     /// let b = weave.new_mark(a).unwrap_or(weave.bottom());
     /// let c = weave.new_mark(a).unwrap_or(weave.bottom());
-    /// assert_eq!(weave.get_marks(a), vec![ b, c ]);
+    /// assert_eq!(weave.get_marks(a).sort(), vec![ b, c ]);
     /// ```
     fn get_marks(&self, index: usize) -> Vec<usize>;
 
