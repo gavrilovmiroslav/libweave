@@ -183,7 +183,7 @@ pub trait Weaveable<W> {
     /// let weave = &Weave::create();
     /// let a = weave.new_knot();
     /// assert_ne!(a, weave.bottom());
-    /// assert!(weave.is_knot(a));
+    /// assert!(weave.is_knot(a).unwrap_or(false));
     /// ```
     fn new_knot(&self) -> usize;
 
@@ -207,7 +207,7 @@ pub trait Weaveable<W> {
     /// let c = weave.new_arrow(a, b).unwrap_or(weave.bottom());
     /// assert_eq!(weave.get_source(c), a);
     /// assert_eq!(weave.get_target(c), b);
-    /// assert!(weave.is_arrow(c));
+    /// assert!(weave.is_arrow(c).unwrap_or(false));
     /// ```
     fn new_arrow(&self, source: usize, target: usize) -> Option<usize>;
 
@@ -230,7 +230,7 @@ pub trait Weaveable<W> {
     /// let b = weave.new_tether(a).unwrap_or(weave.bottom());
     /// assert_eq!(weave.get_source(b), a);
     /// assert_eq!(weave.get_target(b), b);
-    /// assert!(weave.is_tether(b));
+    /// assert!(weave.is_tether(b).unwrap_or(false));
     /// ```
     fn new_tether(&self, source: usize) -> Option<usize>;
 
@@ -253,7 +253,7 @@ pub trait Weaveable<W> {
     /// let b = weave.new_mark(a).unwrap_or(weave.bottom());
     /// assert_eq!(weave.get_source(b), b);
     /// assert_eq!(weave.get_target(a), a);
-    /// assert!(weave.is_mark(b));
+    /// assert!(weave.is_mark(b).unwrap_or(false));
     /// ```
     fn new_mark(&self, target: usize) -> Option<usize>;
 
