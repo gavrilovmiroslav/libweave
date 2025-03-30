@@ -110,10 +110,7 @@ pub trait Weaveable<W> {
     /// Gets the n-th degree **source** of a `motif`. This is equivalent to calling `get_source`
     /// `n` times in a sequence, passing the result of the previous query as the argument.
     ///
-    /// # Example
-    ///
-    ///     get_source_nth(e, 2) = get_source(get_source(e))
-    ///
+    /// It holds that: get_source_nth(e, 2) = get_source(get_source(e))
     fn get_source_nth(&self, index: usize, degree: usize) -> usize;
 
     /// Gets the **target** of a `motif`. The guarantees of `get_target` are the following:
@@ -162,10 +159,7 @@ pub trait Weaveable<W> {
     /// Gets the n-th degree **target** of a `motif`. This is equivalent to calling `get_target`
     /// `n` times in a sequence, passing the result of the previous query as the argument.
     ///
-    /// # Example
-    ///
-    ///     get_target_nth(e, 2) = get_target(get_target(e))
-    ///
+    /// It holds that: get_target_nth(e, 2) = get_target(get_target(e))
     fn get_target_nth(&self, index: usize, degree: usize) -> usize;
 
     /// Creates a new knot (node-like motif) and returns its index as the result.
