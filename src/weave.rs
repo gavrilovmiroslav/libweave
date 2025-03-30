@@ -493,7 +493,7 @@ pub trait Weaveable<W> {
     /// let c = weave.new_knot();
     /// weave.new_arrow(a, b).unwrap_or(weave.bottom());
     /// weave.new_arrow(c, b).unwrap_or(weave.bottom());
-    /// assert_eq!(weave.get_neighbors(b), vec![ a, c ]);
+    /// assert_eq!(weave.get_co_neighbors(b), vec![ a, c ]);
     /// ```
     fn get_co_neighbors(&self, index: usize) -> Vec<usize>;
 
