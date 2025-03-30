@@ -1,5 +1,4 @@
 use std::os::raw::c_void;
-use itertools::Itertools;
 use crate::weave::{MotifId, Weave, WeaveRef, Weaveable};
 
 #[repr(C)]
@@ -14,9 +13,23 @@ pub struct IdCover {
     knots: IdVec,
 }
 
+/// Embeddings are represented by a vector of hashmaps between IDs. To move them across
+/// the FFI boundary, we use the fact that all bindings within an embedding have the same size
+/// (all `HashMap`s have the same `len()`), and that we can know that size upfront. Then, we
+/// linearize all embeddings so that the hashmaps are separated key from value, and laid out
+/// sorted by keys.
+///
+/// # Diagram
+///
+/// {
+///     { { a, b }, { c, d } }, // 1                    size   keys           vals
+///     { { a, b }, { e, f } }, // 2  --->    IdEmbedding(3, { a, b }, { c, d, e, f, g, h })
+///     { { a, b }, { g, h } }  // 3                                    |---| |---| |---|
+/// }                                                                     1     2     3
+///
 #[repr(C)]
 pub struct IdEmbedding {
-    size: usize,
+    len: usize,
     keys: IdVec,
     vals: IdVec,
 }
@@ -212,23 +225,24 @@ pub extern "C" fn weave_find_embeddings(weave: Weave, embed_relation: usize) -> 
     let embeddings = weave.find_embeddings(embed_relation);
     let mut keys = Vec::<usize>::new();
     let mut vals = Vec::<usize>::new();
-    let mut size = 0;
+    let mut len = 0;
 
     if let Some(embeds) = embeddings {
-        if !embeds.is_empty() {
-            size = embeds.first().unwrap().image.len();
+        len = embeds.len();
+
+        for k in embeds.first().unwrap().image.keys() {
+            keys.push(*k);
         }
 
         for embed in &embeds {
-            for k in embed.image.keys().sorted() {
-                keys.push(*k);
+            for k in &keys {
                 vals.push(*embed.image.get(k).unwrap());
             }
         }
     }
-    
+
     IdEmbedding {
-        size,
+        len,
         keys: IdVec::from(keys),
         vals: IdVec::from(vals),
     }
