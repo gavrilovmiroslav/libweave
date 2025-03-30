@@ -147,16 +147,6 @@ pub extern "C" fn get_tethers(weave: Weave, index: usize) -> IdVec {
 }
 
 #[no_mangle]
-pub extern "C" fn get_co_tethers(weave: Weave, index: usize) -> IdVec {
-    IdVec::from(weave.get_co_tethers(index))
-}
-
-#[no_mangle]
 pub extern "C" fn get_marks(weave: Weave, index: usize) -> IdVec {
     IdVec::from(weave.get_marks(index))
-}
-
-#[no_mangle]
-pub extern "C" fn get_co_marks(weave: Weave, index: usize) -> IdVec {
-    IdVec::from(weave.get_co_marks(index))
 }
