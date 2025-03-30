@@ -541,6 +541,31 @@ pub trait Weaveable<W> {
     /// ```
     fn get_co_neighbors(&self, index: usize) -> Vec<usize>;
 
+    /// Gets the immediate neighbors **and** co-neighbors of this motif. If `index` is malformed,
+    /// the result is an empty container. The union of all neighbors and co-neighbors means that
+    /// this function returns **all** the motifs that are connected to and from the `index` motif
+    /// via an arrow.
+    ///
+    /// # Example
+    ///
+    /// ```plaintext
+    ///            pre                        post
+    ///  ------------------------------------------------------
+    ///   [a]>---->[b]>--->[c]     ambi_neighbors(b) = { a, c }
+    /// ```
+    ///
+    /// ```
+    /// use libweave::weave::{Weave, Weaveable};
+    /// let weave = &Weave::create();
+    /// let a = weave.new_knot();
+    /// let b = weave.new_knot();
+    /// let c = weave.new_knot();
+    /// weave.new_arrow(a, b).unwrap_or(weave.bottom());
+    /// weave.new_arrow(b, c).unwrap_or(weave.bottom());
+    /// assert_eq!(weave.get_ambi_neighbors(b), vec![ a, c ]);
+    /// ```
+    fn get_ambi_neighbors(&self, index: usize) -> Vec<usize>;
+
     /// Gets all the tethers of the motif under `index`. If `index` is malformed, the result is an
     /// empty container.
     ///
@@ -976,6 +1001,14 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
         internal.motif_co_neighbors.get_vec(&index).unwrap_or(&vec![]).to_vec()
     }
 
+    fn get_ambi_neighbors(&self, index: usize) -> Vec<usize> {
+        let internal = self.0.borrow();
+        let mut set: HashSet<usize> = HashSet::from_iter(
+            internal.motif_neighbors.get_vec(&index).unwrap_or(&vec![]).to_vec());
+        set.extend(internal.motif_co_neighbors.get_vec(&index).unwrap_or(&vec![]).to_vec());
+        set.into_iter().collect()
+    }
+
     fn get_tethers(&self, index: usize) -> Vec<usize> {
         let internal = self.0.borrow();
         internal.motif_tethers.get_vec(&index).unwrap_or(&vec![]).to_vec()
@@ -1085,14 +1118,13 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
     }
 
     fn find_embeddings(&self, embed_relation: usize) -> Option<Vec<Embedding>> {
-        if let Some((query_repr_index, data_repr_index)) = self.get_hoist_endpoints(embed_relation) {
+        if let Some((query_repr_index, data_repr_index))
+            = self.get_hoist_endpoints(embed_relation) {
             let query_graph = self.get_graph_cover(query_repr_index);
             let data_graph = self.get_graph_cover(data_repr_index);
-            if query_graph.hash == data_graph.hash {
-                return None;
-            }
+            if query_graph.hash == data_graph.hash { return None; }
 
-            return Some(find_all_embeddings(self, query_graph, data_graph));
+            return Some(find_all_embeddings(self, embed_relation, query_graph, data_graph));
         }
 
         None
@@ -1101,6 +1133,7 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
     use crate::weave::{Weave, Weaveable};
 
     #[test]
@@ -1161,6 +1194,18 @@ mod tests {
 
         assert!(!weave.are_connected(b, a));
         assert_eq!(weave.get_co_neighbors(b), vec![ a ]);
+    }
+
+    #[test]
+    fn test_get_ambi_neighbors() {
+        let weave = &Weave::create();
+        let a = weave.new_knot();
+        let b = weave.new_knot();
+        let c = weave.new_knot();
+        let _ = weave.new_arrow(a, b).unwrap();
+        let _ = weave.new_arrow(b, c).unwrap();
+
+        assert_eq!(weave.get_ambi_neighbors(b).into_iter().sorted().collect::<Vec<usize>>(), vec![ a, c ]);
     }
 
     /*
@@ -1406,5 +1451,30 @@ mod tests {
         let flow_cover_b = weave.get_flow_graph_cover(b);
         assert_eq!(flow_cover_b.knots, vec![ a, b, c, d ]);
         assert_ne!(flow_cover_a.hash, flow_cover_b.hash);
+    }
+
+    #[test]
+    fn test_finding_embeddings() {
+        let weave = &Weave::create();
+        // query
+        let a = weave.new_knot();
+        let b = weave.new_knot();
+        let ab = weave.new_arrow(a, b).unwrap();
+        
+        // data
+        let c = weave.new_knot();
+        let d = weave.new_knot();
+        let e = weave.new_knot();
+        let cd = weave.new_arrow(c, d).unwrap();
+        let ce = weave.new_arrow(c, e).unwrap();
+        let de = weave.new_arrow(d, e).unwrap();
+        
+        // hoist
+        let t = weave.new_tether(a).unwrap();
+        let m = weave.new_mark(c).unwrap();
+        let embed = weave.new_arrow(t, m).unwrap();
+        
+        let matches = weave.find_embeddings(embed);
+        assert!(matches.is_some());
     }
 }

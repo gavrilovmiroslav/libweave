@@ -28,7 +28,7 @@ pub struct IdCover {
 /// }                                                                     1     2     3
 ///
 #[repr(C)]
-pub struct IdEmbedding {
+pub struct IdEmbeddings {
     len: usize,
     keys: IdVec,
     vals: IdVec,
@@ -221,7 +221,7 @@ pub extern "C" fn weave_get_graph_cover(weave: Weave, knot_index: usize) -> IdCo
 }
 
 #[no_mangle]
-pub extern "C" fn weave_find_embeddings(weave: Weave, embed_relation: usize) -> IdEmbedding {
+pub extern "C" fn weave_find_embeddings(weave: Weave, embed_relation: usize) -> IdEmbeddings {
     let embeddings = weave.find_embeddings(embed_relation);
     let mut keys = Vec::<usize>::new();
     let mut vals = Vec::<usize>::new();
@@ -241,7 +241,7 @@ pub extern "C" fn weave_find_embeddings(weave: Weave, embed_relation: usize) -> 
         }
     }
 
-    IdEmbedding {
+    IdEmbeddings {
         len,
         keys: IdVec::from(keys),
         vals: IdVec::from(vals),
