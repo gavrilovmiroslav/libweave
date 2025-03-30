@@ -1,6 +1,8 @@
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::hash::{DefaultHasher, Hasher};
 use id_arena::{Arena, Id};
+use itertools::Itertools;
 use multimap::MultiMap;
 
 /// Type alias for motif ID in libweave's internal arenas.
@@ -39,7 +41,7 @@ pub enum Motif {
 /// Weave internals, keeping all allocations and relationships between motifs under wraps.
 /// Significant detail: the weave internal registry contains a special motif called `bottom`,
 /// which represents an error result in some motif computation (for example, asking for a source
-/// of an non-existent motif ID).
+/// of a non-existent motif ID).
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct WeaveInternal<'s> {
@@ -75,6 +77,26 @@ impl<'s> Default for WeaveInternal<'s> {
     }
 }
 
+/// A **cover** is a set of knots that are in some way connected with arrows. The construction of a
+/// cover hashes the resulting knots: use this value to quickly check if two knots are transitively
+/// connected.
+#[derive(Debug, Clone)]
+pub struct Cover {
+    pub hash: u64,
+    pub knots: Vec<usize>,
+}
+
+/// An **embedding** is a pattern-match of a graph within another graph. We then say that one graph is
+/// embedded in another, or that there is an isomorphic subgraph within it. The `Embedding` structure
+/// saves the relation (in the form of the index of a hoisted arrow) that it is a part of, and offers
+/// an `image` containing mappings between nodes of two graphs. Created as part of `find_embeddings`
+/// in `Weaveable<W>`.
+#[derive(Debug, Clone)]
+pub struct Embedding {
+    pub relation: usize,
+    pub image: HashMap<usize, usize>,
+}
+
 /// The main libweave API, mainly used by being implemented by `WeaveRef`, it defines ways to
 /// create, populate, explore, and traverse motifs. As an external API, `Weavable` uses `usize`
 /// for all motif IDs instead of `MotifId`s.
@@ -89,8 +111,25 @@ pub trait Weaveable<W> {
     /// 
     /// # Example
     ///
+    ///
     /// ```plaintext
-    ///     [a] ---->(c) >---e---> (d)----> [b]
+    ///             pre                                         post
+    ///  ---------------------------------------------------------------------------
+    ///                                                         [a]
+    ///        [a]      [b]                            [a] ---->(c)      [b]
+    ///   [a] ---->(c)      [b]                    [a] ---->(c)      (d)----> [b]
+    /// [a] ---->(c)      (d)----> [b]          [a] ---->(c) >---e---> (d)----> [b]
+    ///
+    /// [a] ---->(c) >---e---> (d)----> [b]                source(a) = a
+    /// ^^^
+    /// [a] ---->(c) >---e---> (d)----> [b]                source(c) = a
+    ///  ^^^^^^^^^^^
+    /// [a] ---->(c) >---e---> (d)----> [b]                source(e) = c
+    ///          ^^^^^^^^^^^^^^^^^
+    /// [a] ---->(c) >---e---> (d)----> [b]                source(d) = d
+    ///                        ^^^^^^^^^^^
+    /// [a] ---->(c) >---e---> (d)----> [b]                source(b) = b
+    ///                                 ^^^
     /// ```
     /// 
     /// ```
@@ -484,8 +523,8 @@ pub trait Weaveable<W> {
     ///
     /// ```plaintext
     ///            pre                        post
-    ///  -----------------------------------------------------
-    ///       [a] >----> [b]         coneighbors(b) = { a, c }
+    ///  ------------------------------------------------------
+    ///       [a] >----> [b]         co_neighbors(b) = { a, c }
     ///       [c] >----> [b]
     /// ```
     ///
@@ -547,20 +586,122 @@ pub trait Weaveable<W> {
     /// ```
     fn get_marks(&self, index: usize) -> Vec<usize>;
 
+    /// Gets all the hoisted arrows between `source_index` and `target_index`. A *hoisted arrow* is
+    /// a specific construction in the form of `[a] --->(b) >---c---> (d)---> [e]`, comprising a
+    /// tether, arrow, and mark. If this construction is found, `c` is referred to as being hoisted
+    /// between `[a]` and `[e]` by the meta-motifs `(b)` and `(d)`. Hoisted arrows are useful to
+    /// represent arrows in a meta structure, that isn't a part of some graph.
+    fn get_hoisted_arrows(&self, source_index: usize, target_index: usize) -> Vec<usize>;
+
     /// Gets all the hoisted arrows going from the `index` motif. A *hoisted arrow* is a specific
     /// construction in the form of `[a] --->(b) >---c---> (d)---> [e]`, comprising a tether, arrow,
     /// and mark. If this construction is found, `c` is referred to as being hoisted between `[a]`
     /// and `[e]` by the meta-motifs `(b)` and `(d)`. Hoisted arrows are useful to represent arrows
     /// in a meta structure, that isn't a part of some graph (for example, hierarchies).
-    fn get_hoisted_arrows(&self, index: usize) -> Vec<usize>;
+    fn get_hoisted_arrows_from(&self, index: usize) -> Vec<usize>;
 
-    /// Gets all the co-hoisted arrows going from the `index` motif, which is the same as getting
-    /// all the *hoisted* arrows going _into_ this motif. A *hoisted arrow* is a specific construction
-    /// in the form of `[a] --->(b) >---c---> (d)---> [e]`, comprising a tether, arrow, and mark.
-    /// If this construction is found, `c` is referred to as being hoisted between `[a]` and `[e]`
-    /// by the meta-motifs `(b)` and `(d)`. This is simply searching for hoisted arrows from the
-    /// target element (`[e]` in the diagram).
-    fn get_co_hoisted_arrows(&self, index: usize) -> Vec<usize>;
+    /// Gets all the hoisted arrows going to the `index` motif. A *hoisted arrow* is a specific
+    /// construction in the form of `[a] --->(b) >---c---> (d)---> [e]`, comprising a tether, arrow,
+    /// and mark. If this construction is found, `c` is referred to as being hoisted between `[a]`
+    /// and `[e]` by the meta-motifs `(b)` and `(d)`.
+    fn get_hoisted_arrows_to(&self, index: usize) -> Vec<usize>;
+
+    /// Gets the hoist endpoints of a hoisted arrow specified by `index`. A *hoisted arrow* is a
+    /// specific construction in the form of `[a] --->(b) >---c---> (d)---> [e]`, comprising a
+    /// tether, arrow, and mark. If this construction is found, `c` is referred to as being hoisted
+    /// between `[a]` and `[e]` by the meta-motifs `(b)` and `(d)`. The endpoints of a hoisted arrow
+    /// are exactly the two motifs - `[a]` and `[e]`. Returns `None` if `index` does not specify a
+    /// hoisted arrow, or is otherwise malformed.
+    fn get_hoist_endpoints(&self, index: usize) -> Option<(usize, usize)>;
+
+    /// Given a knot `index`, gets the flow cover of this graph: the set of all knots that are
+    /// connected with `index` via arrows. The cover recognizes `source` to `target` arrow flow, and
+    /// counts only the knots that are _connected_ in flow-order. The cover will change depending on
+    /// the representative chosen only to include forward-facing nodes up to transitive closure. If
+    /// the `index` motif is not a knot, the result will simply be an empty cover.
+    ///
+    /// Note: the `get_flow_graph_cover` function does *not* use a recursive solution instead building up
+    /// a queue of next values to visit and collecting nodes in breadth-first fashion.
+    ///
+    /// Note: due to the hashing operation, the cover's `knots` vector will be ordered by `index`.
+    ///
+    /// # Example
+    ///
+    /// ```plaintext
+    ///            pre                            post
+    ///  ----------------------------------------------------------------------
+    ///   [d]<---<[a]<---<[b]>--->[c]            flow_cover(a) = { a, d }
+    ///  ----------------------------------------------------------------------
+    ///   [d]<---<[a]<---<[b]>--->[c]            flow_cover(b) = { a, b, c, d }
+    ///  ----------------------------------------------------------------------
+    ///   [d]<---<[a]<---<[b]>--->[c]            flow_cover(c) = { c }
+    /// ```
+    ///
+    /// ```
+    /// use itertools::Itertools;
+    /// use libweave::weave::{Weave, Weaveable};
+    /// let weave = &Weave::create();
+    /// let a = weave.new_knot();
+    /// let b = weave.new_knot();
+    /// let c = weave.new_knot();
+    /// let d = weave.new_knot();
+    /// let _ = weave.new_arrow(b, a);
+    /// let _ = weave.new_arrow(a, d);
+    /// let _ = weave.new_arrow(b, c);
+    /// let cover = weave.get_flow_graph_cover(a).knots;
+    /// assert_eq!(cover.into_iter().sorted().collect::<Vec<usize>>(), vec![ a, d ]);
+    /// let cover = weave.get_flow_graph_cover(b).knots;
+    /// assert_eq!(cover.into_iter().sorted().collect::<Vec<usize>>(), vec![ a, b, c, d ]);
+    /// let cover = weave.get_flow_graph_cover(c).knots;
+    /// assert_eq!(cover.into_iter().sorted().collect::<Vec<usize>>(), vec![ c ]);
+    /// ```
+    fn get_flow_graph_cover(&self, knot_index: usize) -> Cover;
+
+    /// Given a knot `index`, gets the cover of this graph: the set of all knots that are connected
+    /// with `index` via arrows. The cover doesn't recognize `source` to `target` arrow flow, and
+    /// counts all the knots as if they are _ambi-connected_. The cover will be the same regardless
+    /// of representative `index` chosen.  If the `index` motif is not a knot, the result will
+    /// simply be an empty cover.
+    ///
+    /// Note: the `get_graph_cover` function does *not* use a recursive solution instead building up
+    /// a queue of next values to visit and collecting nodes in breadth-first fashion.
+    ///
+    /// Note: due to the hashing operation, the cover's `knots` vector will be ordered by `index`.
+    ///
+    /// # Example
+    ///
+    /// ```plaintext
+    ///            pre                                     post
+    ///  -----------------------------------------------------------------
+    ///   [d]<---<[a]<---<[b]>--->[c]            cover(a) = { a, b, c, d }
+    /// ```
+    ///
+    /// ```
+    /// use itertools::Itertools;
+    /// use libweave::weave::{Weave, Weaveable};
+    /// let weave = &Weave::create();
+    /// let a = weave.new_knot();
+    /// let b = weave.new_knot();
+    /// let c = weave.new_knot();
+    /// let d = weave.new_knot();
+    /// let _ = weave.new_arrow(b, a);
+    /// let _ = weave.new_arrow(a, d);
+    /// let _ = weave.new_arrow(b, c);
+    /// let cover = weave.get_graph_cover(a).knots;
+    /// assert_eq!(cover.into_iter().sorted().collect::<Vec<usize>>(), vec![ a, b, c, d ]);
+    /// ```
+    fn get_graph_cover(&self, knot_index: usize) -> Cover;
+
+    /// Finds all embeddings of one graph in another. The `embed_relation` needs to be a hoisted
+    /// arrow between two arbitrary representative nodes from the graphs. The source of this relation
+    /// needs to be the graph that we are looking to find, while the target is the graph we are
+    /// searching in. The `Embedding` structure will contain the `embed_relation` index, as well as
+    /// an `image` mapping between the motifs in the `source` and `target` graphs.
+    ///
+    /// Guarantees: the `embed_relation` connects two knots from two different graphs (checked by
+    /// creating the two `Cover` graphs and comparing their hashes). If the graphs are the same,
+    /// the result is `None`.
+    fn find_embeddings(&self, embed_relation: usize) -> Option<Vec<Embedding>>;
 }
 
 #[repr(C)]
@@ -832,18 +973,112 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
         internal.motif_marks.get_vec(&index).unwrap_or(&vec![]).to_vec()
     }
 
-    fn get_hoisted_arrows(&self, index: usize) -> Vec<usize> {
+    fn get_hoisted_arrows(&self, source_index: usize, target_index: usize) -> Vec<usize> {
+        self.get_tethers(source_index).iter()
+            .flat_map(|t| self.get_connections_from(*t))
+            .filter(|a| {
+                let tgt = self.get_target(*a);
+                self.is_mark(tgt).unwrap_or(false) && self.get_target(tgt) == target_index
+            })
+            .collect()
+    }
+
+    fn get_hoisted_arrows_from(&self, index: usize) -> Vec<usize> {
         self.get_tethers(index).iter()
             .flat_map(|t| self.get_connections_from(*t))
             .filter(|a| self.is_mark(self.get_target(*a)).unwrap_or(false))
             .collect()
     }
 
-    fn get_co_hoisted_arrows(&self, index: usize) -> Vec<usize> {
+    fn get_hoisted_arrows_to(&self, index: usize) -> Vec<usize> {
         self.get_marks(index).iter()
             .flat_map(|t| self.get_connections_to(*t))
             .filter(|a| self.is_tether(self.get_source(*a)).unwrap_or(false))
             .collect()
+    }
+
+    fn get_hoist_endpoints(&self, index: usize) -> Option<(usize, usize)> {
+        if self.is_arrow(index).unwrap_or(false) {
+            let (tether, mark) = (self.get_source(index), self.get_target(index));
+
+            if self.is_tether(tether).unwrap_or(false)
+                && self.is_mark(mark).unwrap_or(false) {
+
+                return Some((self.get_source(tether), self.get_target(mark)));
+            }
+        }
+
+        None
+    }
+
+    fn get_flow_graph_cover(&self, knot_index: usize) -> Cover {
+        let reserved = { self.0.borrow().motif_index.len() * 2 };
+        let mut visited = HashSet::with_capacity(reserved);
+        let mut queue = VecDeque::with_capacity(reserved);
+
+        queue.push_back(knot_index);
+
+        while let Some(next) = queue.pop_front() {
+            if !visited.contains(&next) {
+                visited.insert(next);
+
+                let neighbors = self.get_neighbors(next);
+                for neighbor in neighbors {
+                    if !visited.contains(&neighbor) {
+                        queue.push_back(neighbor);
+                    }
+                }
+            }
+        }
+
+        let knots = visited.iter().sorted().cloned().collect::<Vec<usize>>();
+        let mut hasher = DefaultHasher::new();
+        for knot in &knots { hasher.write_usize(*knot); }
+
+        Cover { knots, hash: hasher.finish() }
+    }
+
+    fn get_graph_cover(&self, knot_index: usize) -> Cover {
+        let reserved = { self.0.borrow().motif_index.len() * 2 };
+        let mut visited = HashSet::with_capacity(reserved);
+        let mut queue = VecDeque::with_capacity(reserved);
+
+        queue.push_back(knot_index);
+
+        while let Some(next) = queue.pop_front() {
+            if !visited.contains(&next) {
+                visited.insert(next);
+
+                let neighbors = self.get_neighbors(next);
+                for neighbor in neighbors {
+                    if !visited.contains(&neighbor) {
+                        queue.push_back(neighbor);
+                    }
+                }
+
+                let co_neighbors = self.get_co_neighbors(next);
+                for co_neighbor in co_neighbors {
+                    if !visited.contains(&co_neighbor) {
+                        queue.push_back(co_neighbor);
+                    }
+                }
+            }
+        }
+
+        let knots = visited.iter().sorted().cloned().collect::<Vec<usize>>();
+        let mut hasher = DefaultHasher::new();
+        for knot in &knots { hasher.write_usize(*knot); }
+
+        Cover { knots, hash: hasher.finish() }
+    }
+
+    fn find_embeddings(&self, embed_relation: usize) -> Option<Vec<Embedding>> {
+        if let Some((query_repr_index, data_repr_index)) = self.get_hoist_endpoints(embed_relation) {
+            let _query_graph = self.get_graph_cover(query_repr_index);
+            let _data_graph = self.get_graph_cover(data_repr_index);
+        }
+
+        None
     }
 }
 
@@ -915,7 +1150,7 @@ mod tests {
         Ambi-connected: connected with at least one arrow in any direction
         Bi-connected: connected with at least one arrow in both directions
 
-        ambi(x, y) == ambi(x, y)  and  bi(x, y) == bi(y, x)
+        ambi(x, y) == ambi(x, y)  -and-   bi(x, y) == bi(y, x)
 
         a)
             [a]>-c-->[b]
@@ -1033,12 +1268,12 @@ mod tests {
         [a]<-------(m)
 
         A mark targets another motif, but is itself not a knot.
-        They are knot-like in the fact that they are ENDPOINTs.
+        They are knot-like in the fact that they are endpoints.
         They are arrow-like in the fact that they "tie" to other motifs.
         Marks are good form for making properties of objects.
      */
     #[test]
-    fn test_mark() {
+    fn test_marks() {
         let weave = &Weave::create();
         let a = weave.new_knot();
         let m = weave.new_mark(a).unwrap();
@@ -1053,7 +1288,7 @@ mod tests {
         [a]------->(t)
 
         Other motifs tie to tethers, but tethers themselves aren't knots.
-        They are knot-like in the fact that they are ENDPOINTs.
+        They are knot-like in the fact that they are endpoints.
         They are arrow-like in the fact that other motifs "tie" to them.
         Tethers are good for representing hierarchies.
      */
@@ -1070,10 +1305,11 @@ mod tests {
     }
 
     /*
-        Hierarchies are arrows between a tether and a mark,
-        grounding objects but not bulking their arrow-sets
-        with meta-arrows that aren't an *actual* part of a
-        graph.
+        Hoisting an arrow between a tether and a mark makes it
+        possible for us to add hierarchies to objects without
+        bulking their arrow-sets with meta-arrows that aren't
+        an *actual* part of a graph that we might want to traverse
+        or search through.
 
                 the parenthood relationship
                            |
@@ -1106,31 +1342,20 @@ mod tests {
             weave.new_arrow(t, m)
         }
 
-        fn get_child_and_parent(weave: Weave, parenthood: usize) -> Option<(usize, usize)> {
-            if weave.is_arrow(parenthood).unwrap_or(false) {
-                let (source, target) =
-                    (weave.get_source_nth(parenthood, 2),
-                     weave.get_target_nth(parenthood, 2));
-
-                return Some((source, target));
-            }
-
-            None
-        }
-
         let weave = &Weave::create();
         let a = weave.new_knot();
         let b = weave.new_knot();
         let parenthood = make_parent_hierarchy(weave, a, b).unwrap();
-        let cp = get_child_and_parent(weave, parenthood);
+        let cp = weave.get_hoist_endpoints(parenthood);
 
         assert!(cp.is_some());
         let (child, parent) = cp.unwrap();
         assert_eq!(child, a);
         assert_eq!(parent, b);
 
-        assert_eq!(weave.get_hoisted_arrows(a), vec![ parenthood ]);
-        assert_eq!(weave.get_co_hoisted_arrows(b), vec![ parenthood ]);
+        assert_eq!(weave.get_hoisted_arrows(a, b), vec![ parenthood ]);
+        assert_eq!(weave.get_hoisted_arrows_from(a), vec![ parenthood ]);
+        assert_eq!(weave.get_hoisted_arrows_to(b), vec![ parenthood ]);
     }
 
     #[test]
@@ -1141,5 +1366,28 @@ mod tests {
         let b = weave.new_mark(a).unwrap_or(weave.bottom());
         let c = weave.new_mark(a).unwrap_or(weave.bottom());
         assert_eq!(weave.get_marks(a).into_iter().sorted().collect::<Vec<usize>>(), vec![ b, c ]);
+    }
+
+    #[test]
+    fn test_covers() {
+        let weave = &Weave::create();
+        let a = weave.new_knot();
+        let b = weave.new_knot();
+        let c = weave.new_knot();
+        let d = weave.new_knot();
+        let _ = weave.new_arrow(b, a);
+        let _ = weave.new_arrow(a, d);
+        let _ = weave.new_arrow(b, c);
+        let cover_a = weave.get_graph_cover(a);
+        assert_eq!(cover_a.knots, vec![ a, b, c, d ]);
+        let cover_b = weave.get_graph_cover(b);
+        assert_eq!(cover_b.knots, vec![ a, b, c, d ]);
+        assert_eq!(cover_a.hash, cover_b.hash);
+
+        let flow_cover_a = weave.get_flow_graph_cover(a);
+        assert_eq!(flow_cover_a.knots, vec![ a, d ]);
+        let flow_cover_b = weave.get_flow_graph_cover(b);
+        assert_eq!(flow_cover_b.knots, vec![ a, b, c, d ]);
+        assert_ne!(flow_cover_a.hash, flow_cover_b.hash);
     }
 }
