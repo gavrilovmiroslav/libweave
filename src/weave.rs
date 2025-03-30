@@ -4,6 +4,7 @@ use std::hash::{DefaultHasher, Hasher};
 use id_arena::{Arena, Id};
 use itertools::Itertools;
 use multimap::MultiMap;
+use crate::embeddings::find_all_embeddings;
 
 /// Type alias for motif ID in libweave's internal arenas.
 pub type MotifId = Id<Motif>;
@@ -701,6 +702,18 @@ pub trait Weaveable<W> {
     /// Guarantees: the `embed_relation` connects two knots from two different graphs (checked by
     /// creating the two `Cover` graphs and comparing their hashes). If the graphs are the same,
     /// the result is `None`.
+    ///
+    /// # Example
+    ///
+    /// ```plaintext
+    ///                pre                                      post
+    ///  ---------------------------------------------------------------
+    ///       (t)>-----embed----->(m)               find_embeddings(embed) = {
+    ///       ^                    \                    { { a, c }, { b, d } },
+    ///       |                     v                   { { a, c }, { b, e } }
+    ///     [a]>-->[b]      [e]<--<[c]>-->[d]       }
+    /// ```
+    /// TODO (mg): add code example
     fn find_embeddings(&self, embed_relation: usize) -> Option<Vec<Embedding>>;
 }
 
@@ -1003,7 +1016,6 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
 
             if self.is_tether(tether).unwrap_or(false)
                 && self.is_mark(mark).unwrap_or(false) {
-
                 return Some((self.get_source(tether), self.get_target(mark)));
             }
         }
@@ -1074,8 +1086,13 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
 
     fn find_embeddings(&self, embed_relation: usize) -> Option<Vec<Embedding>> {
         if let Some((query_repr_index, data_repr_index)) = self.get_hoist_endpoints(embed_relation) {
-            let _query_graph = self.get_graph_cover(query_repr_index);
-            let _data_graph = self.get_graph_cover(data_repr_index);
+            let query_graph = self.get_graph_cover(query_repr_index);
+            let data_graph = self.get_graph_cover(data_repr_index);
+            if query_graph.hash == data_graph.hash {
+                return None;
+            }
+
+            return Some(find_all_embeddings(self, query_graph, data_graph));
         }
 
         None

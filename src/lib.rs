@@ -5,5 +5,7 @@
 //! to write custom data structures and algorithms for traversing, pattern-matching, and
 //! transforming data, it offers a rich library of generic tools that fit into any workflow.
 //! 
+
+mod embeddings;
 pub mod weave;
 pub mod ffi;
