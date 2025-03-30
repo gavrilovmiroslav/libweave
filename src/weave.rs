@@ -390,7 +390,7 @@ pub trait Weaveable<W> {
     /// let d = weave.new_arrow(b, a).unwrap_or(weave.bottom());
     /// assert_eq!(weave.get_connections(a, b), vec![ c ]);
     /// let e = weave.new_arrow(a, b).unwrap_or(weave.bottom());
-    /// assert_eq!(weave.get_connections(a, b).sorted(), vec![ c, e ]);
+    /// assert_eq!(weave.get_connections(a, b).into_iter().sorted().collect::<Vec<usize>>(), vec![ c, e ]);
     /// ```
     fn get_connections(&self, source: usize, target: usize) -> Vec<usize>;
 
@@ -417,7 +417,7 @@ pub trait Weaveable<W> {
     /// let c = weave.new_arrow(a, b).unwrap_or(weave.bottom());
     /// let d = weave.new_arrow(b, a).unwrap_or(weave.bottom());
     /// let e = weave.new_arrow(a, b).unwrap_or(weave.bottom());
-    /// assert_eq!(weave.get_connections_from(a).sorted(), vec![ c, e ]);
+    /// assert_eq!(weave.get_connections_from(a).into_iter().sorted().collect::<Vec<usize>>(), vec![ c, e ]);
     /// ```
     fn get_connections_from(&self, source: usize) -> Vec<usize>;
 
@@ -444,7 +444,7 @@ pub trait Weaveable<W> {
     /// let c = weave.new_arrow(a, b).unwrap_or(weave.bottom());
     /// let d = weave.new_arrow(b, a).unwrap_or(weave.bottom());
     /// let e = weave.new_arrow(a, b).unwrap_or(weave.bottom());
-    /// assert_eq!(weave.get_connections_to(b).sorted(), vec![ c, e ]);
+    /// assert_eq!(weave.get_connections_to(b).into_iter().sorted().collect::<Vec<usize>>(), vec![ c, e ]);
     /// ```
     fn get_connections_to(&self, target: usize) -> Vec<usize>;
 
@@ -472,7 +472,7 @@ pub trait Weaveable<W> {
     /// weave.new_arrow(a, b).unwrap_or(weave.bottom());
     /// weave.new_arrow(a, c).unwrap_or(weave.bottom());
     /// weave.new_arrow(d, a).unwrap_or(weave.bottom());
-    /// assert_eq!(weave.get_neighbors(a).sorted(), vec![ b, c ]);
+    /// assert_eq!(weave.get_neighbors(a).into_iter().sorted().collect::<Vec<usize>>(), vec![ b, c ]);
     /// ```
     fn get_neighbors(&self, index: usize) -> Vec<usize>;
 
@@ -520,7 +520,7 @@ pub trait Weaveable<W> {
     /// let a = weave.new_knot();
     /// let b = weave.new_tether(a).unwrap_or(weave.bottom());
     /// let c = weave.new_tether(a).unwrap_or(weave.bottom());
-    /// assert_eq!(weave.get_tethers(a).sorted(), vec![ b, c ]);
+    /// assert_eq!(weave.get_tethers(a).into_iter().sorted().collect::<Vec<usize>>(), vec![ b, c ]);
     /// ```
     fn get_tethers(&self, index: usize) -> Vec<usize>;
 
@@ -543,7 +543,7 @@ pub trait Weaveable<W> {
     /// let a = weave.new_knot();
     /// let b = weave.new_mark(a).unwrap_or(weave.bottom());
     /// let c = weave.new_mark(a).unwrap_or(weave.bottom());
-    /// assert_eq!(weave.get_marks(a).sorted(), vec![ b, c ]);
+    /// assert_eq!(weave.get_marks(a).into_iter().sorted().collect::<Vec<usize>>(), vec![ b, c ]);
     /// ```
     fn get_marks(&self, index: usize) -> Vec<usize>;
 
@@ -1131,5 +1131,15 @@ mod tests {
 
         assert_eq!(weave.get_hoisted_arrows(a), vec![ parenthood ]);
         assert_eq!(weave.get_co_hoisted_arrows(b), vec![ parenthood ]);
+    }
+
+    #[test]
+    fn test_ordering_in_unsorted_vector() {
+        use itertools::Itertools;
+        let weave = &Weave::create();
+        let a = weave.new_knot();
+        let b = weave.new_mark(a).unwrap_or(weave.bottom());
+        let c = weave.new_mark(a).unwrap_or(weave.bottom());
+        assert_eq!(weave.get_marks(a).into_iter().sorted().collect::<Vec<usize>>(), vec![ b, c ]);
     }
 }
