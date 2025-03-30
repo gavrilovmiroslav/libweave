@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use id_arena::{Arena, Id};
 use multimap::MultiMap;
 
@@ -358,7 +358,7 @@ pub trait Weaveable<W> {
     /// let a = weave.new_knot();
     /// let b = weave.new_knot();
     /// weave.new_arrow(a, b).unwrap_or(weave.bottom());
-    /// assert!(!weave.are_connected(a, b));
+    /// assert!(weave.are_connected(a, b));
     /// assert!(!weave.are_connected(b, a));
     /// ```
     fn are_connected(&self, source: usize, target: usize) -> bool;
@@ -780,26 +780,30 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
 
     fn get_connections_from(&self, source: usize) -> Vec<usize> {
         let internal = self.0.borrow();
-        let mut results = vec![];
+        let mut results = HashSet::new();
         if internal.motif_neighbors.contains_key(&source) {
             for neighbor in internal.motif_neighbors.get_vec(&source).unwrap() {
-                results.extend_from_slice(&internal.motif_conns.get_vec(&(source, *neighbor)).cloned().unwrap());
+                for a in internal.motif_conns.get_vec(&(source, *neighbor)).unwrap() {
+                    results.insert(*a);
+                }
             }
         }
 
-        results
+        results.into_iter().collect()
     }
 
     fn get_connections_to(&self, target: usize) -> Vec<usize> {
         let internal = self.0.borrow();
-        let mut results = vec![];
+        let mut results = HashSet::new();
         if internal.motif_co_neighbors.contains_key(&target) {
             for neighbor in internal.motif_co_neighbors.get_vec(&target).unwrap() {
-                results.extend_from_slice(&internal.motif_conns.get_vec(&(*neighbor, target)).cloned().unwrap());
+                for a in internal.motif_conns.get_vec(&(*neighbor, target)).unwrap() {
+                    results.insert(*a);
+                }
             }
         }
 
-        results
+        results.into_iter().collect()
     }
 
     fn get_neighbors(&self, index: usize) -> Vec<usize> {
