@@ -89,7 +89,9 @@ pub trait Weaveable<W> {
     /// 
     /// # Example
     ///
+    /// ```plaintext
     ///     [a] ---->(c) >---e---> (d)----> [b]
+    /// ```
     /// 
     /// ```
     /// use libweave::weave::{Weave, Weaveable};
