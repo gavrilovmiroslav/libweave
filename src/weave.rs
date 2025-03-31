@@ -1006,7 +1006,7 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
         let mut set: HashSet<usize> = HashSet::from_iter(
             internal.motif_neighbors.get_vec(&index).unwrap_or(&vec![]).to_vec());
         set.extend(internal.motif_co_neighbors.get_vec(&index).unwrap_or(&vec![]).to_vec());
-        set.into_iter().collect()
+        set.into_iter().sorted().collect()
     }
 
     fn get_tethers(&self, index: usize) -> Vec<usize> {
