@@ -1459,21 +1459,21 @@ mod tests {
         // query
         let a = weave.new_knot();
         let b = weave.new_knot();
-        let ab = weave.new_arrow(a, b).unwrap();
-        
+        let _ab = weave.new_arrow(a, b).unwrap();
+
         // data
         let c = weave.new_knot();
         let d = weave.new_knot();
         let e = weave.new_knot();
-        let cd = weave.new_arrow(c, d).unwrap();
-        let ce = weave.new_arrow(c, e).unwrap();
-        let de = weave.new_arrow(d, e).unwrap();
-        
+        let _cd = weave.new_arrow(c, d).unwrap();
+        let _ce = weave.new_arrow(c, e).unwrap();
+        let _de = weave.new_arrow(d, e).unwrap();
+
         // hoist
         let t = weave.new_tether(a).unwrap();
         let m = weave.new_mark(c).unwrap();
         let embed = weave.new_arrow(t, m).unwrap();
-        
+
         let matches = weave.find_embeddings(embed);
         assert!(matches.is_some());
     }

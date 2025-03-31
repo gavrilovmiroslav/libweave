@@ -12,7 +12,6 @@ struct SearchEmbeddingContext<'w, 's> {
 
 #[derive(Debug, Clone)]
 struct CandidateSet {
-    remaining: Vec<usize>,
     bindings: HashMap<usize, Vec<usize>>,
 }
 
@@ -25,7 +24,6 @@ impl From<&'_ SearchEmbeddingContext<'_, '_>> for CandidateSet {
         }
 
         CandidateSet {
-            remaining: value.query.knots.clone(),
             bindings: hm,
         }
     }
@@ -36,8 +34,10 @@ pub fn find_all_embeddings(weave: &Weave, embed: usize, query: Cover, data: Cove
     let mut embeddings = Vec::<Embedding>::new();
     let mut gamma = HashSet::<usize>::new();
     let mut delta = DeadEndPattern::new();
+    let mut partial_map = HashMap::new();
+    partial_map.insert(*context.query.knots.first().unwrap(), *context.data.knots.first().unwrap());
     search(0, &context, &mut embeddings, &mut gamma, &mut delta,
-           HashMap::default(), CandidateSet::from(&context));
+           partial_map, CandidateSet::from(&context));
 
     embeddings
 }
@@ -60,64 +60,65 @@ fn search(id: u64, context: &SearchEmbeddingContext, embeddings: &mut Vec<Embedd
         println!("Candidate set for {} = {:?}", id, new_candidate_set);
         // for line 19
         let past_report = embeddings.len();
+
         // 7
-        if let Some(ui) = new_candidate_set.remaining.first() {
-            // 8
-            for n in context.weave.get_ambi_neighbors(*ui) {
-                if partial_map.contains_key(&n) {
-                    gamma.insert(n);
-                }
-            }
-        } else {
-            // 10
-            let mut g = HashSet::<usize>::new();
-            // 11
-            let candidates = new_candidate_set.bindings.get(&(k + 1)).unwrap_or(&vec![]).to_vec();
-            for v in &candidates {
-                // 12
-                if partial_map.contains_key(v) {
-                    // 13
-                    for (m, mv) in &partial_map {
-                        if *mv == *v { g.insert(*m); }
-                    }
-                } else {
-                    // 14
-                    let ukp1 = *context.query.knots.get(k + 1).unwrap();
-                    let mut subset = true;
-                    if let Some(de) = delta.get(&(ukp1, *v)) {
-                        for (du, dv) in de {
-                            if !partial_map.contains_key(du) || *partial_map.get(du).unwrap() != *dv {
-                                subset = false;
-                                break;
-                            }
-                        }
-
-                        if subset {
-                            // 15
-                            for (du, _dv) in de {
-                                g.insert(*du);
-                            }
-                        }
-                    }
-
-                    if !subset {
-                        // 17
-                        let mut pm = HashMap::new();
-                        for (a, b) in &partial_map {
-                            pm.insert(*a, *b);
-                        }
-                        pm.insert(ukp1, *v);
-                        // 17.5
-                        let mut cs = candidate_set.clone();
-                        if let Some(idx) = cs.remaining.iter().position(|a| *a == ukp1) {
-                            cs.remaining.remove(idx);
-                            g.extend(search(get_id(&pm), context, embeddings, gamma, delta, pm, cs));
-                        }
+        for (ui, v) in &new_candidate_set.bindings {
+            if v.is_empty() {
+                // 8
+                for n in context.weave.get_ambi_neighbors(*ui) {
+                    if partial_map.contains_key(&n) {
+                        gamma.insert(n);
                     }
                 }
+            } else {
+                // 10
+                let mut g = HashSet::<usize>::new();
+                // 11
+                let candidates = new_candidate_set.bindings.get(&(k + 1)).unwrap_or(&vec![]).to_vec();
+                for v in &candidates {
+                    // 12
+                    if partial_map.contains_key(v) {
+                        // 13
+                        for (m, mv) in &partial_map {
+                            if *mv == *v { g.insert(*m); }
+                        }
+                    } else {
+                        // 14
+                        if let Some(ukp1) = context.query.knots.get(k + 1) {
+                            let mut subset = true;
+                            if let Some(de) = delta.get(&(*ukp1, *v)) {
+                                for (du, dv) in de {
+                                    if !partial_map.contains_key(du) || *partial_map.get(du).unwrap() != *dv {
+                                        subset = false;
+                                        break;
+                                    }
+                                }
+
+                                if subset {
+                                    // 15
+                                    for (du, _dv) in de {
+                                        g.insert(*du);
+                                    }
+                                }
+                            }
+
+                            if !subset {
+                                // 17
+                                let mut pm = HashMap::new();
+                                for (a, b) in &partial_map {
+                                    pm.insert(*a, *b);
+                                }
+                                pm.insert(*ukp1, *v);
+                                // 17.5
+                                let cs = candidate_set.clone();
+                                g.extend(search(get_id(&pm), context, embeddings, gamma, delta, pm, cs));
+                            }
+                        }
+                    }
+                }
+                // 18
+                gamma.extend(g);
             }
-            // 18
-            gamma.extend(g);
         }
 
         let new_report = embeddings.len();
@@ -158,9 +159,9 @@ fn refine_candidate_set_with_edge_constraints(weave: Weave, candidate_set: &Cand
     for (ui, cui) in candidate_set.bindings.iter() {
         let mut stay = HashSet::new();
         for neighbor in weave.get_ambi_neighbors(*ui) {
-            if partial_map.contains_key(&neighbor) {
-                // in here: N(ui) /intersect dom(M), neighbor == ui'
-                for neighbor in weave.get_ambi_neighbors(*partial_map.get(&neighbor).unwrap()) {
+            // in here: N(ui) /intersect dom(M), neighbor == ui'
+            if let Some(n) = partial_map.get(&neighbor) {
+                for neighbor in weave.get_ambi_neighbors(*n) {
                     if cui.contains(&neighbor) {
                         stay.insert(neighbor);
                     }
@@ -172,7 +173,6 @@ fn refine_candidate_set_with_edge_constraints(weave: Weave, candidate_set: &Cand
     }
 
     CandidateSet {
-        remaining: candidate_set.remaining.clone(),
         bindings: new_bindings
     }
 }
