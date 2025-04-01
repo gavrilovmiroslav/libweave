@@ -1,4 +1,5 @@
 use std::os::raw::c_void;
+use crate::embeddings::failure_pruning::FailurePruningEmbedding;
 use crate::weave::{MotifId, Weave, WeaveRef, Weaveable};
 
 #[repr(C)]
@@ -221,8 +222,8 @@ pub extern "C" fn weave_get_graph_cover(weave: Weave, knot_index: usize) -> IdCo
 }
 
 #[no_mangle]
-pub extern "C" fn weave_find_embeddings(weave: Weave, embed_relation: usize) -> IdEmbeddings {
-    let embeddings = weave.find_embeddings(embed_relation);
+pub extern "C" fn weave_find_all_embeddings_fsg(weave: Weave, embed_relation: usize) -> IdEmbeddings {
+    let embeddings = weave.find_all_embeddings::<FailurePruningEmbedding>(embed_relation);
     let mut keys = Vec::<usize>::new();
     let mut vals = Vec::<usize>::new();
     let mut len = 0;

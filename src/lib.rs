@@ -6,6 +6,7 @@
 //! transforming data, it offers a rich library of generic tools that fit into any workflow.
 //! 
 
-mod embeddings;
 pub mod weave;
 pub mod ffi;
+pub mod embedding;
+pub mod embeddings;

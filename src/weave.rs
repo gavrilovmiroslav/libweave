@@ -4,7 +4,7 @@ use std::hash::{DefaultHasher, Hasher};
 use id_arena::{Arena, Id};
 use itertools::Itertools;
 use multimap::MultiMap;
-use crate::embeddings::find_all_embeddings;
+use crate::embedding::FindAllEmbeddings;
 
 /// Type alias for motif ID in libweave's internal arenas.
 pub type MotifId = Id<Motif>;
@@ -85,6 +85,14 @@ impl<'s> Default for WeaveInternal<'s> {
 pub struct Cover {
     pub hash: u64,
     pub knots: Vec<usize>,
+}
+
+impl From<Vec<usize>> for Cover {
+    fn from(value: Vec<usize>) -> Self {
+        let mut hasher = DefaultHasher::new();
+        for v in &value { hasher.write_usize(*v); }
+        Cover { hash: hasher.finish(), knots: value }
+    }
 }
 
 /// An **embedding** is a pattern-match of a graph within another graph. We then say that one graph is
@@ -403,6 +411,22 @@ pub trait Weaveable<W> {
     /// ```
     fn are_connected(&self, source: usize, target: usize) -> bool;
 
+    /// Returns the in degree of the `index` motif, or the number of arrows going into the motif.
+    /// If index is malformed or doesn't exist, the function returns `None`.
+    fn get_in_degree(&self, index: usize) -> Option<usize>;
+
+    /// Returns the out degree of the `index` motif, or the number of arrows going out from the motif.
+    /// If index is malformed or doesn't exist, the function returns `None`.
+    fn get_out_degree(&self, index: usize) -> Option<usize>;
+
+    /// Returns the total degree of the `index` motif, or the number of arrows going into or out
+    /// from the motif. If index is malformed or doesn't exist, the function returns `None`.
+    fn get_in_out_degree(&self, index: usize) -> Option<usize>;
+
+    /// Returns the loop degree of the `index` motif, or the number of arrows going from the motif
+    /// back into itself. If index is malformed or doesn't exist, the function returns `None`.
+    fn get_loop_degree(&self, index: usize) -> Option<usize>;
+
     /// Returns a vector of indices of all the arrows between `source` and `target`. If either
     /// `source` or `target` are malformed, the result is an empty container. This function respects
     /// the `source -> target` flow order when returning connections.
@@ -433,6 +457,10 @@ pub trait Weaveable<W> {
     /// assert_eq!(weave.get_connections(a, b).into_iter().sorted().collect::<Vec<usize>>(), vec![ c, e ]);
     /// ```
     fn get_connections(&self, source: usize, target: usize) -> Vec<usize>;
+
+    /// Gets the loop connections between `index` and itself. Equivalent to:
+    /// `weave.get_connections(index, index)`.
+    fn get_loops(&self, index: usize) -> Vec<usize>;
 
     /// Returns a vector of indices of all the arrows with `source` as source. If `source` is
     /// malformed, the result is an empty container. This function respects the `source -> target`
@@ -739,7 +767,7 @@ pub trait Weaveable<W> {
     ///     [a]>-->[b]      [e]<--<[c]>-->[d]       }
     /// ```
     /// TODO (mg): add code example
-    fn find_embeddings(&self, embed_relation: usize) -> Option<Vec<Embedding>>;
+    fn find_all_embeddings<FE: FindAllEmbeddings>(&self, embed_relation: usize) -> Option<Vec<Embedding>>;
 }
 
 #[repr(C)]
@@ -958,9 +986,64 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
         internal.motif_conns.contains_key(&(source_index, target_index))
     }
 
+    fn get_in_degree(&self, index: usize) -> Option<usize> {
+        let internal = self.0.borrow();
+        let mut result = 0;
+
+        if !internal.motif_index.contains_key(&index) {
+            return None;
+        }
+
+        if internal.motif_co_neighbors.contains_key(&index) {
+            for neighbor in internal.motif_co_neighbors.get_vec(&index).unwrap() {
+                result += internal.motif_conns.get_vec(&(*neighbor, index)).unwrap().len();
+            }
+
+            return Some(result);
+        }
+
+        Some(0)
+    }
+
+    fn get_out_degree(&self, index: usize) -> Option<usize> {
+        let internal = self.0.borrow();
+        let mut result = 0;
+
+        if !internal.motif_index.contains_key(&index) {
+            return None;
+        }
+
+        if internal.motif_neighbors.contains_key(&index) {
+            for neighbor in internal.motif_neighbors.get_vec(&index).unwrap() {
+                result += internal.motif_conns.get_vec(&(index, *neighbor)).unwrap().len();
+            }
+
+            return Some(result);
+        }
+
+        Some(0)
+    }
+
+    fn get_in_out_degree(&self, index: usize) -> Option<usize> {
+        if let (Some(in_d), Some(out_d)) = (self.get_in_degree(index), self.get_out_degree(index)) {
+            Some(in_d + out_d)
+        } else {
+            None
+        }
+    }
+
+    fn get_loop_degree(&self, index: usize) -> Option<usize> {
+        Some(self.get_connections(index, index).len())
+    }
+
     fn get_connections(&self, source: usize, target: usize) -> Vec<usize> {
         let internal = self.0.borrow();
-        internal.motif_conns.get_vec(&(source, target)).cloned().unwrap().to_vec()
+        internal.motif_conns.get_vec(&(source, target)).cloned().unwrap_or(vec![]).to_vec()
+    }
+
+    fn get_loops(&self, index: usize) -> Vec<usize> {
+        let internal = self.0.borrow();
+        internal.motif_conns.get_vec(&(index, index)).cloned().unwrap_or(vec![]).to_vec()
     }
 
     fn get_connections_from(&self, source: usize) -> Vec<usize> {
@@ -1076,11 +1159,7 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
             }
         }
 
-        let knots = visited.iter().sorted().cloned().collect::<Vec<usize>>();
-        let mut hasher = DefaultHasher::new();
-        for knot in &knots { hasher.write_usize(*knot); }
-
-        Cover { knots, hash: hasher.finish() }
+        Cover::from(visited.iter().sorted().cloned().collect::<Vec<usize>>())
     }
 
     fn get_graph_cover(&self, knot_index: usize) -> Cover {
@@ -1110,21 +1189,17 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
             }
         }
 
-        let knots = visited.iter().sorted().cloned().collect::<Vec<usize>>();
-        let mut hasher = DefaultHasher::new();
-        for knot in &knots { hasher.write_usize(*knot); }
-
-        Cover { knots, hash: hasher.finish() }
+        Cover::from(visited.iter().sorted().cloned().collect::<Vec<usize>>())
     }
 
-    fn find_embeddings(&self, embed_relation: usize) -> Option<Vec<Embedding>> {
+    fn find_all_embeddings<FE: FindAllEmbeddings>(&self, embed_relation: usize) -> Option<Vec<Embedding>> {
         if let Some((query_repr_index, data_repr_index))
             = self.get_hoist_endpoints(embed_relation) {
             let query_graph = self.get_graph_cover(query_repr_index);
             let data_graph = self.get_graph_cover(data_repr_index);
             if query_graph.hash == data_graph.hash { return None; }
 
-            return Some(find_all_embeddings(self, embed_relation, query_graph, data_graph));
+            return Some(FE::find_all_embeddings(self, embed_relation, query_graph, data_graph));
         }
 
         None
@@ -1134,6 +1209,7 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
+    use crate::embeddings::pattern_matching::PatternMatchingEmbedding;
     use crate::weave::{Weave, Weaveable};
 
     #[test]
@@ -1474,7 +1550,8 @@ mod tests {
         let m = weave.new_mark(c).unwrap();
         let embed = weave.new_arrow(t, m).unwrap();
 
-        let matches = weave.find_embeddings(embed);
+        let matches = weave.find_all_embeddings::<PatternMatchingEmbedding>(embed);
         assert!(matches.is_some());
+        println!("{:?}", matches.unwrap());
     }
 }
