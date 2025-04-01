@@ -8,6 +8,7 @@ use crate::embedding::FindAllEmbeddings;
 
 /// Type alias for motif ID in libweave's internal arenas.
 pub type MotifId = Id<Motif>;
+pub type MotifIdx = usize;
 
 /// A **motif** is the smallest building block in libweave.
 ///
@@ -48,6 +49,7 @@ pub enum Motif {
 pub struct WeaveInternal<'s> {
     pub(crate) motif_bottom: usize,
     motif_space: Arena<Motif>,
+    motif_freelist: VecDeque<Motif>,
     motif_index: HashMap<usize, MotifId>,
     motif_conns: MultiMap<(usize, usize), usize>,
     motif_neighbors: MultiMap<usize, usize>,

@@ -123,7 +123,7 @@ fn assign_candidate_and_test(
 impl FindAllEmbeddings for PatternMatchingEmbedding {
     fn find_all_embeddings(weave: &Weave, embed: usize, query: Cover, data: Cover) -> Vec<Embedding> {
         let mut embeddings = vec![];
-        let mut state = find_candidates_by_degrees(weave, &data, &query);
+        let mut state = find_candidates_by_degrees(weave, &query, &data);
         let mut transient = vec![];
 
         for start_node in &query.knots {
