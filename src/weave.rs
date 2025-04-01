@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{RefCell, RefMut};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{DefaultHasher, Hasher};
 use id_arena::{Arena, Id};
@@ -47,15 +47,15 @@ pub enum Motif {
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct WeaveInternal<'s> {
-    pub(crate) motif_bottom: usize,
+    pub(crate) motif_bottom: MotifIdx,
     motif_space: Arena<Motif>,
-    motif_freelist: VecDeque<Motif>,
-    motif_index: HashMap<usize, MotifId>,
-    motif_conns: MultiMap<(usize, usize), usize>,
-    motif_neighbors: MultiMap<usize, usize>,
-    motif_co_neighbors: MultiMap<usize, usize>,
-    motif_tethers: MultiMap<usize, usize>,
-    motif_marks: MultiMap<usize, usize>,
+    motif_freelist: VecDeque<MotifId>,
+    motif_index: HashMap<MotifIdx, MotifId>,
+    motif_conns: MultiMap<(MotifIdx, MotifIdx), MotifIdx>,
+    motif_neighbors: MultiMap<MotifIdx, MotifIdx>,
+    motif_co_neighbors: MultiMap<MotifIdx, MotifIdx>,
+    motif_tethers: MultiMap<MotifIdx, MotifIdx>,
+    motif_marks: MultiMap<MotifIdx, MotifIdx>,
     string_space: Arena<&'s str>,
 }
 
@@ -70,6 +70,7 @@ impl<'s> Default for WeaveInternal<'s> {
             motif_space,
             motif_bottom: bottom.index(),
             motif_index,
+            motif_freelist: Default::default(),
             motif_conns: Default::default(),
             motif_neighbors: Default::default(),
             motif_co_neighbors: Default::default(),
@@ -86,11 +87,11 @@ impl<'s> Default for WeaveInternal<'s> {
 #[derive(Debug, Clone)]
 pub struct Cover {
     pub hash: u64,
-    pub knots: Vec<usize>,
+    pub knots: Vec<MotifIdx>,
 }
 
-impl From<Vec<usize>> for Cover {
-    fn from(value: Vec<usize>) -> Self {
+impl From<Vec<MotifIdx>> for Cover {
+    fn from(value: Vec<MotifIdx>) -> Self {
         let mut hasher = DefaultHasher::new();
         for v in &value { hasher.write_usize(*v); }
         Cover { hash: hasher.finish(), knots: value }
@@ -104,8 +105,8 @@ impl From<Vec<usize>> for Cover {
 /// in `Weaveable<W>`.
 #[derive(Debug, Clone)]
 pub struct Embedding {
-    pub relation: usize,
-    pub image: HashMap<usize, usize>,
+    pub relation: MotifIdx,
+    pub image: HashMap<MotifIdx, MotifIdx>,
 }
 
 /// The main libweave API, mainly used by being implemented by `WeaveRef`, it defines ways to
@@ -157,13 +158,13 @@ pub trait Weaveable<W> {
     /// assert_eq!(weave.get_source(d), d);
     /// assert_eq!(weave.get_source(b), b);
     /// ```
-    fn get_source(&self, index: usize) -> usize;
+    fn get_source(&self, index: MotifIdx) -> MotifIdx;
 
     /// Gets the n-th degree **source** of a `motif`. This is equivalent to calling `get_source`
     /// `n` times in a sequence, passing the result of the previous query as the argument.
     ///
     /// It holds that: get_source_nth(e, 2) = get_source(get_source(e))
-    fn get_source_nth(&self, index: usize, degree: usize) -> usize;
+    fn get_source_nth(&self, index: MotifIdx, degree: usize) -> MotifIdx;
 
     /// Gets the **target** of a `motif`. The guarantees of `get_target` are the following:
     ///     - if `index` represents a valid `knot` or `tether`, the result will be `index`
@@ -206,13 +207,13 @@ pub trait Weaveable<W> {
     /// assert_eq!(weave.get_target(d), b);
     /// assert_eq!(weave.get_target(b), b);
     /// ```
-    fn get_target(&self, index: usize) -> usize;
+    fn get_target(&self, index: MotifIdx) -> MotifIdx;
 
     /// Gets the n-th degree **target** of a `motif`. This is equivalent to calling `get_target`
     /// `n` times in a sequence, passing the result of the previous query as the argument.
     ///
     /// It holds that: get_target_nth(e, 2) = get_target(get_target(e))
-    fn get_target_nth(&self, index: usize, degree: usize) -> usize;
+    fn get_target_nth(&self, index: MotifIdx, degree: usize) -> MotifIdx;
 
     /// Creates a new knot (node-like motif) and returns its index as the result.
     ///
@@ -231,7 +232,7 @@ pub trait Weaveable<W> {
     /// assert_ne!(a, weave.bottom());
     /// assert!(weave.is_knot(a).unwrap_or(false));
     /// ```
-    fn new_knot(&self) -> usize;
+    fn new_knot(&self) -> MotifIdx;
 
     /// Creates a new arrow (arrow-like motif) and returns an option with its index as the result,
     /// or `None` if either the `source` or `target` motifs are malformed. Can be easily defaulted
@@ -255,7 +256,7 @@ pub trait Weaveable<W> {
     /// assert_eq!(weave.get_target(c), b);
     /// assert!(weave.is_arrow(c).unwrap_or(false));
     /// ```
-    fn new_arrow(&self, source: usize, target: usize) -> Option<usize>;
+    fn new_arrow(&self, source: MotifIdx, target: MotifIdx) -> Option<MotifIdx>;
 
     /// Creates a new tether (arrow-like extension) and returns an option with its index as a result,
     /// or `None` if the `source` motif is malformed. Can be easily defaulted to `usize` by using
@@ -278,7 +279,7 @@ pub trait Weaveable<W> {
     /// assert_eq!(weave.get_target(b), b);
     /// assert!(weave.is_tether(b).unwrap_or(false));
     /// ```
-    fn new_tether(&self, source: usize) -> Option<usize>;
+    fn new_tether(&self, source: MotifIdx) -> Option<MotifIdx>;
 
     /// Creates a new mark (node-like extension) and returns an option with its index as a result,
     /// or `None` if the `target` motif is malformed. Can be easily defaulted to `usize` by using
@@ -301,30 +302,41 @@ pub trait Weaveable<W> {
     /// assert_eq!(weave.get_target(a), a);
     /// assert!(weave.is_mark(b).unwrap_or(false));
     /// ```
-    fn new_mark(&self, target: usize) -> Option<usize>;
+    fn new_mark(&self, target: MotifIdx) -> Option<MotifIdx>;
+
+    /// Deletes the `target` motif and any other motif it might have been upholding. A motif is
+    /// considered to be _upholding_ another motif if its existence hinges on the existence of the
+    /// first one. Arrows are upheld by their source and target, marks and tethers are upheld by
+    /// their source, and their target, respectively. Deleting a single motif might delete more than
+    /// just that, depending on the structure.
+    fn delete(&self, target: MotifIdx) -> bool;
+
+    /// Returns `true` if the `MotifId` has been allocated in storage, and has not been deleted.
+    /// Deleting a motif frees the `Motif` for later re-use, and we consider it non-existing.
+    fn exists(&self, index: MotifIdx) -> bool;
 
     /// Identifies the underlying `MotifId` for the given `index`. Mostly internal use.
-    fn identify(&self, index: usize) -> MotifId;
+    fn identify(&self, index: MotifIdx) -> MotifId;
 
     /// Identifies the underlying `MotifId` for the given `index` but instead of returning
     /// the `bottom` motif, it returns `None` when `index` doesn't exist. Mostly internal use.
-    fn opt_identify(&self, index: usize) -> Option<MotifId>;
+    fn opt_identify(&self, index: MotifIdx) -> Option<MotifId>;
 
     /// Returns an option with `true` if the motif under `index` is a knot. Returns `None` if the
     /// motif under `index` doesn't exist.
-    fn is_knot(&self, index: usize) -> Option<bool>;
+    fn is_knot(&self, index: MotifIdx) -> Option<bool>;
 
     /// Returns an option with `true` if the motif under `index` is an arrow. Returns `None` if the
     /// motif under `index` doesn't exist.
-    fn is_arrow(&self, index: usize) -> Option<bool>;
+    fn is_arrow(&self, index: MotifIdx) -> Option<bool>;
 
     /// Returns an option with `true` if the motif under `index` is a tether. Returns `None` if the
     /// motif under `index` doesn't exist.
-    fn is_tether(&self, index: usize) -> Option<bool>;
+    fn is_tether(&self, index: MotifIdx) -> Option<bool>;
 
     /// Returns an option with `true` if the motif under `index` is a mark. Returns `None` if the
     /// motif under `index` doesn't exist.
-    fn is_mark(&self, index: usize) -> Option<bool>;
+    fn is_mark(&self, index: MotifIdx) -> Option<bool>;
 
     /// Returns true if `source` and `target` motifs are connected in _any_ direction. This is the
     /// most forgiving connection comparator - use `are_connected` to check whether two motifs are
@@ -350,7 +362,7 @@ pub trait Weaveable<W> {
     /// assert!(weave.are_ambi_connected(a, b));
     /// assert!(weave.are_ambi_connected(b, a));
     /// ```
-    fn are_ambi_connected(&self, source: usize, target: usize) -> bool;
+    fn are_ambi_connected(&self, source: MotifIdx, target: MotifIdx) -> bool;
 
     /// Returns true if `source` and `target` motifs are connected in _both_ directions. This is the
     /// least forgiving connection comparator - use `are_ambi_connected` to check whether two motifs
@@ -385,7 +397,7 @@ pub trait Weaveable<W> {
     /// assert!(weave.are_bi_connected(a, b));
     /// assert!(weave.are_bi_connected(b, a));
     /// ```
-    fn are_bi_connected(&self, source: usize, target: usize) -> bool;
+    fn are_bi_connected(&self, source: MotifIdx, target: MotifIdx) -> bool;
 
     /// Returns true if `source` and `target` motifs are connected in _the_ direction specified by
     /// the `source -> target` flow. Use `are_ambi_connected` to check whether two motifs are
@@ -411,23 +423,23 @@ pub trait Weaveable<W> {
     /// assert!(weave.are_connected(a, b));
     /// assert!(!weave.are_connected(b, a));
     /// ```
-    fn are_connected(&self, source: usize, target: usize) -> bool;
+    fn are_connected(&self, source: MotifIdx, target: MotifIdx) -> bool;
 
     /// Returns the in degree of the `index` motif, or the number of arrows going into the motif.
     /// If index is malformed or doesn't exist, the function returns `None`.
-    fn get_in_degree(&self, index: usize) -> Option<usize>;
+    fn get_in_degree(&self, index: MotifIdx) -> Option<usize>;
 
     /// Returns the out degree of the `index` motif, or the number of arrows going out from the motif.
     /// If index is malformed or doesn't exist, the function returns `None`.
-    fn get_out_degree(&self, index: usize) -> Option<usize>;
+    fn get_out_degree(&self, index: MotifIdx) -> Option<usize>;
 
     /// Returns the total degree of the `index` motif, or the number of arrows going into or out
     /// from the motif. If index is malformed or doesn't exist, the function returns `None`.
-    fn get_in_out_degree(&self, index: usize) -> Option<usize>;
+    fn get_in_out_degree(&self, index: MotifIdx) -> Option<usize>;
 
     /// Returns the loop degree of the `index` motif, or the number of arrows going from the motif
     /// back into itself. If index is malformed or doesn't exist, the function returns `None`.
-    fn get_loop_degree(&self, index: usize) -> Option<usize>;
+    fn get_loop_degree(&self, index: MotifIdx) -> Option<usize>;
 
     /// Returns a vector of indices of all the arrows between `source` and `target`. If either
     /// `source` or `target` are malformed, the result is an empty container. This function respects
@@ -458,11 +470,11 @@ pub trait Weaveable<W> {
     /// let e = weave.new_arrow(a, b).unwrap_or(weave.bottom());
     /// assert_eq!(weave.get_connections(a, b).into_iter().sorted().collect::<Vec<usize>>(), vec![ c, e ]);
     /// ```
-    fn get_connections(&self, source: usize, target: usize) -> Vec<usize>;
+    fn get_connections(&self, source: MotifIdx, target: MotifIdx) -> Vec<MotifIdx>;
 
     /// Gets the loop connections between `index` and itself. Equivalent to:
     /// `weave.get_connections(index, index)`.
-    fn get_loops(&self, index: usize) -> Vec<usize>;
+    fn get_loops(&self, index: MotifIdx) -> Vec<MotifIdx>;
 
     /// Returns a vector of indices of all the arrows with `source` as source. If `source` is
     /// malformed, the result is an empty container. This function respects the `source -> target`
@@ -489,7 +501,7 @@ pub trait Weaveable<W> {
     /// let e = weave.new_arrow(a, b).unwrap_or(weave.bottom());
     /// assert_eq!(weave.get_connections_from(a).into_iter().sorted().collect::<Vec<usize>>(), vec![ c, e ]);
     /// ```
-    fn get_connections_from(&self, source: usize) -> Vec<usize>;
+    fn get_connections_from(&self, source: MotifIdx) -> Vec<MotifIdx>;
 
     /// Returns a vector of indices of all the arrows with `target` as target. If `source` is
     /// malformed, the result is an empty container. This function respects the `source -> target`
@@ -516,7 +528,7 @@ pub trait Weaveable<W> {
     /// let e = weave.new_arrow(a, b).unwrap_or(weave.bottom());
     /// assert_eq!(weave.get_connections_to(b).into_iter().sorted().collect::<Vec<usize>>(), vec![ c, e ]);
     /// ```
-    fn get_connections_to(&self, target: usize) -> Vec<usize>;
+    fn get_connections_to(&self, target: MotifIdx) -> Vec<MotifIdx>;
 
     /// Gets the immediate neighbors of this motif. For the purposes of this function, a neighbor
     /// is any entity that is at the end of an **arrow** from another motif.
@@ -544,7 +556,7 @@ pub trait Weaveable<W> {
     /// weave.new_arrow(d, a).unwrap_or(weave.bottom());
     /// assert_eq!(weave.get_neighbors(a).into_iter().sorted().collect::<Vec<usize>>(), vec![ b, c ]);
     /// ```
-    fn get_neighbors(&self, index: usize) -> Vec<usize>;
+    fn get_neighbors(&self, index: MotifIdx) -> Vec<MotifIdx>;
 
     /// Gets the immediate co-neighbors of this motif. If `index` is malformed, the result is an
     /// empty container. For the purposes of this function, a co-neighbor is the dual of a neighbor:
@@ -569,7 +581,7 @@ pub trait Weaveable<W> {
     /// weave.new_arrow(c, b).unwrap_or(weave.bottom());
     /// assert_eq!(weave.get_co_neighbors(b), vec![ a, c ]);
     /// ```
-    fn get_co_neighbors(&self, index: usize) -> Vec<usize>;
+    fn get_co_neighbors(&self, index: MotifIdx) -> Vec<MotifIdx>;
 
     /// Gets the immediate neighbors **and** co-neighbors of this motif. If `index` is malformed,
     /// the result is an empty container. The union of all neighbors and co-neighbors means that
@@ -594,7 +606,7 @@ pub trait Weaveable<W> {
     /// weave.new_arrow(b, c).unwrap_or(weave.bottom());
     /// assert_eq!(weave.get_ambi_neighbors(b), vec![ a, c ]);
     /// ```
-    fn get_ambi_neighbors(&self, index: usize) -> Vec<usize>;
+    fn get_ambi_neighbors(&self, index: MotifIdx) -> Vec<MotifIdx>;
 
     /// Gets all the tethers of the motif under `index`. If `index` is malformed, the result is an
     /// empty container.
@@ -617,7 +629,7 @@ pub trait Weaveable<W> {
     /// let c = weave.new_tether(a).unwrap_or(weave.bottom());
     /// assert_eq!(weave.get_tethers(a).into_iter().sorted().collect::<Vec<usize>>(), vec![ b, c ]);
     /// ```
-    fn get_tethers(&self, index: usize) -> Vec<usize>;
+    fn get_tethers(&self, index: MotifIdx) -> Vec<MotifIdx>;
 
     /// Gets all the marks of the motif under `index`. If `index` is malformed, the result is an
     /// empty container.
@@ -640,27 +652,27 @@ pub trait Weaveable<W> {
     /// let c = weave.new_mark(a).unwrap_or(weave.bottom());
     /// assert_eq!(weave.get_marks(a).into_iter().sorted().collect::<Vec<usize>>(), vec![ b, c ]);
     /// ```
-    fn get_marks(&self, index: usize) -> Vec<usize>;
+    fn get_marks(&self, index: MotifIdx) -> Vec<MotifIdx>;
 
     /// Gets all the hoisted arrows between `source_index` and `target_index`. A *hoisted arrow* is
     /// a specific construction in the form of `[a] --->(b) >---c---> (d)---> [e]`, comprising a
     /// tether, arrow, and mark. If this construction is found, `c` is referred to as being hoisted
     /// between `[a]` and `[e]` by the meta-motifs `(b)` and `(d)`. Hoisted arrows are useful to
     /// represent arrows in a meta structure, that isn't a part of some graph.
-    fn get_hoisted_arrows(&self, source_index: usize, target_index: usize) -> Vec<usize>;
+    fn get_hoisted_arrows(&self, source_index: MotifIdx, target_index: MotifIdx) -> Vec<MotifIdx>;
 
     /// Gets all the hoisted arrows going from the `index` motif. A *hoisted arrow* is a specific
     /// construction in the form of `[a] --->(b) >---c---> (d)---> [e]`, comprising a tether, arrow,
     /// and mark. If this construction is found, `c` is referred to as being hoisted between `[a]`
     /// and `[e]` by the meta-motifs `(b)` and `(d)`. Hoisted arrows are useful to represent arrows
     /// in a meta structure, that isn't a part of some graph (for example, hierarchies).
-    fn get_hoisted_arrows_from(&self, index: usize) -> Vec<usize>;
+    fn get_hoisted_arrows_from(&self, index: MotifIdx) -> Vec<MotifIdx>;
 
     /// Gets all the hoisted arrows going to the `index` motif. A *hoisted arrow* is a specific
     /// construction in the form of `[a] --->(b) >---c---> (d)---> [e]`, comprising a tether, arrow,
     /// and mark. If this construction is found, `c` is referred to as being hoisted between `[a]`
     /// and `[e]` by the meta-motifs `(b)` and `(d)`.
-    fn get_hoisted_arrows_to(&self, index: usize) -> Vec<usize>;
+    fn get_hoisted_arrows_to(&self, index: MotifIdx) -> Vec<MotifIdx>;
 
     /// Gets the hoist endpoints of a hoisted arrow specified by `index`. A *hoisted arrow* is a
     /// specific construction in the form of `[a] --->(b) >---c---> (d)---> [e]`, comprising a
@@ -668,7 +680,7 @@ pub trait Weaveable<W> {
     /// between `[a]` and `[e]` by the meta-motifs `(b)` and `(d)`. The endpoints of a hoisted arrow
     /// are exactly the two motifs - `[a]` and `[e]`. Returns `None` if `index` does not specify a
     /// hoisted arrow, or is otherwise malformed.
-    fn get_hoist_endpoints(&self, index: usize) -> Option<(usize, usize)>;
+    fn get_hoist_endpoints(&self, index: MotifIdx) -> Option<(MotifIdx, MotifIdx)>;
 
     /// Given a knot `index`, gets the flow cover of this graph: the set of all knots that are
     /// connected with `index` via arrows. The cover recognizes `source` to `target` arrow flow, and
@@ -711,7 +723,7 @@ pub trait Weaveable<W> {
     /// let cover = weave.get_flow_graph_cover(c).knots;
     /// assert_eq!(cover.into_iter().sorted().collect::<Vec<usize>>(), vec![ c ]);
     /// ```
-    fn get_flow_graph_cover(&self, knot_index: usize) -> Cover;
+    fn get_flow_graph_cover(&self, knot_index: MotifIdx) -> Cover;
 
     /// Given a knot `index`, gets the cover of this graph: the set of all knots that are connected
     /// with `index` via arrows. The cover doesn't recognize `source` to `target` arrow flow, and
@@ -746,7 +758,7 @@ pub trait Weaveable<W> {
     /// let cover = weave.get_graph_cover(a).knots;
     /// assert_eq!(cover.into_iter().sorted().collect::<Vec<usize>>(), vec![ a, b, c, d ]);
     /// ```
-    fn get_graph_cover(&self, knot_index: usize) -> Cover;
+    fn get_graph_cover(&self, knot_index: MotifIdx) -> Cover;
 
     /// Finds all embeddings of one graph in another. The `embed_relation` needs to be a hoisted
     /// arrow between two arbitrary representative nodes from the graphs. The source of this relation
@@ -769,19 +781,30 @@ pub trait Weaveable<W> {
     ///     [a]>-->[b]      [e]<--<[c]>-->[d]       }
     /// ```
     /// TODO (mg): add code example
-    fn find_all_embeddings<FE: FindAllEmbeddings>(&self, embed_relation: usize) -> Option<Vec<Embedding>>;
+    fn find_all_embeddings<FE: FindAllEmbeddings>(&self, embed_relation: MotifIdx) -> Option<Vec<Embedding>>;
 }
 
 #[repr(C)]
 #[allow(improper_ctypes)]
 #[allow(improper_ctypes_definitions)]
 #[derive(Clone, Debug)]
-pub struct WeaveRef<'s>(pub(crate) Box<RefCell<WeaveInternal<'s>>>, pub(crate) usize);
+pub struct WeaveRef<'s>(pub(crate) Box<RefCell<WeaveInternal<'s>>>, pub(crate) MotifIdx);
 
 pub type Weave<'w, 's> = &'w WeaveRef<'s>;
 
 impl<'s> WeaveRef<'s> {
-    pub fn bottom(&self) -> usize { self.1 }
+    pub fn bottom(&self) -> MotifIdx { self.1 }
+}
+
+// Type aliases are removed in impl for easier translation into ffi
+
+fn weave_alloc(internal: &mut RefMut<WeaveInternal>, motif: Motif) -> MotifId {
+    if let Some(free) = internal.motif_freelist.pop_front() {
+        *internal.motif_space.get_mut(free).unwrap() = motif;
+        free
+    } else {
+        internal.motif_space.alloc(motif)
+    }
 }
 
 impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
@@ -845,7 +868,7 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
 
     fn new_knot(&self) -> usize {
         let mut internal = self.0.borrow_mut();
-        let knot = internal.motif_space.alloc(Motif::Knot);
+        let knot = weave_alloc(&mut internal, Motif::Knot);
         let index = knot.index();
         internal.motif_index.insert(index, knot);
         index
@@ -860,7 +883,7 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
         let source_valid = internal.motif_index.get(&source_index).copied();
         let target_valid = internal.motif_index.get(&target_index).copied();
         if let (Some(source), Some(target)) = (source_valid, target_valid) {
-            let arrow = internal.motif_space.alloc(Motif::Arrow { source, target });
+            let arrow = weave_alloc(&mut internal, Motif::Arrow { source, target });
             let index = arrow.index();
             internal.motif_index.insert(index, arrow);
             internal.motif_conns.insert((source_index, target_index), index);
@@ -878,7 +901,7 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
         if source_index == bottom { return None; }
 
         if let Some(source) = internal.motif_index.get(&source_index).copied() {
-            let tether = internal.motif_space.alloc(Motif::Tether { source });
+            let tether = weave_alloc(&mut internal, Motif::Tether { source });
             let index = tether.index();
             internal.motif_index.insert(index, tether);
             internal.motif_tethers.insert(source_index, index);
@@ -894,7 +917,7 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
         if target_index == bottom { return None; }
 
         if let Some(target) = internal.motif_index.get(&target_index).copied() {
-            let mark = internal.motif_space.alloc(Motif::Mark { target });
+            let mark = weave_alloc(&mut internal, Motif::Mark { target });
             let index = mark.index();
             internal.motif_index.insert(index, mark);
             internal.motif_marks.insert(target_index, index);
@@ -902,6 +925,68 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
         } else {
             None
         }
+    }
+
+    fn delete(&self, target: usize) -> bool {
+        let mut queue = VecDeque::new();
+        let mut visited = HashSet::new();
+        let mut delete_set = HashSet::new();
+
+        queue.push_back(target);
+        delete_set.insert(target);
+
+        while let Some(motif) = queue.pop_front() {
+            if !visited.contains(&motif) {
+                visited.insert(motif);
+
+                if !self.is_knot(motif).unwrap_or(true) {
+                    delete_set.insert(motif);
+                }
+
+                queue.extend(self.get_connections_to(motif));
+                queue.extend(self.get_connections_from(motif));
+                queue.extend(self.get_marks(motif));
+                queue.extend(self.get_tethers(motif));
+            }
+        }
+
+        let mut internal = self.0.borrow_mut();
+        for del in &delete_set {
+            if let Some(&id) = internal.motif_index.get(del) {
+                let remove_arrow_endpoints = internal.motif_conns.iter().filter(|&c| {
+                    let (a, b) = c;
+                    &a.0 == del || &a.1 == del || b == del
+                }).map(|c| *c.0).collect::<Vec<_>>();
+
+                for rem in remove_arrow_endpoints {
+                    internal.motif_conns.remove(&rem);
+                }
+
+                let remove_from_neighbors = internal.motif_neighbors.get_vec(del).unwrap_or(&vec![]).to_vec();
+                internal.motif_co_neighbors.remove(del);
+                for rem in remove_from_neighbors {
+                    internal.motif_neighbors.remove(&rem);
+                }
+
+                let remove_from_co_neighbors = internal.motif_neighbors.get_vec(del).unwrap_or(&vec![]).to_vec();
+                internal.motif_neighbors.remove(del);
+                for rem in remove_from_co_neighbors {
+                    internal.motif_co_neighbors.remove(&rem);
+                }
+
+                internal.motif_marks.remove(del);
+                internal.motif_tethers.remove(del);
+                internal.motif_freelist.push_back(id);
+                internal.motif_index.remove(del);
+            }
+        }
+
+        !delete_set.is_empty()
+    }
+
+    fn exists(&self, index: usize) -> bool {
+        let internal = self.0.borrow();
+        internal.motif_index.contains_key(&index)
     }
 
     fn identify(&self, index: usize) -> MotifId {

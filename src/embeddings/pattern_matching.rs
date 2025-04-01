@@ -15,7 +15,6 @@ pub struct PatternMatchingEmbedding {
 }
 
 fn find_candidates_by_degrees(weave: &Weave, query: &Cover, data: &Cover) -> PatternMatchingEmbedding {
-    println!("{:?} in {:?}", query.knots, data.knots);
     let mut pattern_matching = PatternMatchingEmbedding::default();
     let mut in_degree_map = ListOrderedMultimap::new();
     let mut out_degree_map = ListOrderedMultimap::new();
@@ -25,12 +24,7 @@ fn find_candidates_by_degrees(weave: &Weave, query: &Cover, data: &Cover) -> Pat
         let loop_degree = weave.get_loop_degree(*target_node).unwrap();
         let in_degree = weave.get_in_degree(*target_node).unwrap() - loop_degree;
         let out_degree = weave.get_out_degree(*target_node).unwrap() - loop_degree;
-
-        println!(
-            "\t\tTARGET {:?} {} {} {}",
-            target_node, in_degree, out_degree, loop_degree
-        );
-
+        
         for i in 0..=in_degree {
             in_degree_map.append(i, *target_node);
         }
@@ -45,36 +39,26 @@ fn find_candidates_by_degrees(weave: &Weave, query: &Cover, data: &Cover) -> Pat
 
         pattern_matching.loops.insert(*target_node, loop_degree);
 
-        println!("\t\t-----------------------",);
-
         for pattern_node in &query.knots {
             let loops = weave.get_loops(*pattern_node);
             let loop_degree = loops.len();
             let in_degree = weave.get_in_degree(*pattern_node).unwrap() - loop_degree;
             let out_degree = weave.get_out_degree(*pattern_node).unwrap() - loop_degree;
-            println!(
-                "\t\tPATTERN {:?} {} {} {}",
-                pattern_node, in_degree, out_degree, loop_degree
-            );
+            
             let in_candidates = in_degree_map.get_all(&in_degree).collect_vec();
             let out_candidates = out_degree_map.get_all(&out_degree).collect_vec();
             let loop_candidates = loop_degree_map.get_all(&loop_degree).collect_vec();
 
-            println!("\t\tIN CAND:   {:?}", in_candidates);
-            println!("\t\tOUT CAND:  {:?}", out_candidates);
-            println!("\t\tLOOP CAND: {:?}", loop_candidates);
             in_candidates
                 .intersect(out_candidates)
                 .intersect(loop_candidates)
                 .into_iter()
                 .for_each(|target_node| {
-                    println!("{} <-> {}", *pattern_node, target_node);
                     pattern_matching.candidates.append(*pattern_node, *target_node);
                 });
         }
     }
 
-    println!("{:?}", pattern_matching.candidates);
     pattern_matching
 }
 
@@ -86,10 +70,6 @@ fn assign_candidate_and_test(
     bindings: &mut HashMap<usize, usize>,
     results: &mut Vec<HashMap<usize, usize>>,
 ) {
-    println!(
-        "ASSIGN CANDIDATE AND TEST: {:?} {:?}\nREMAINING: {:?}\n",
-        bindings, results, remaining_candidates
-    );
     if let Some((head, tail)) = remaining_candidates.split_first() {
         for binding in state.pattern_candidates.get_all(head) {
             bindings.insert(*head, *binding);
@@ -97,15 +77,10 @@ fn assign_candidate_and_test(
             bindings.remove(head);
         }
     } else {
-        println!(
-            "\n\t*********** NO REMAINING CANDIDATES. TESTING {:?}",
-            bindings
-        );
         let traversal = Cover::from(bindings.values().cloned().collect_vec());
 
         let candidates = find_candidates_by_degrees(weave, pattern, &traversal).candidates;
         let candidates_found = candidates.keys_len();
-        println!("\nBY DEGREES ({}): {:?}", candidates_found, candidates);
         
         if candidates_found == bindings.len() {
             results.push(HashMap::from_iter(
@@ -114,8 +89,6 @@ fn assign_candidate_and_test(
                     .map(|(k, v)| (*k, state.candidate_mapping.get(v).unwrap().1))
                     .collect_vec(),
             ));
-
-            println!("\tRESULTS FOUND: {:?}", bindings,);
         }
     }
 }
@@ -195,7 +168,7 @@ impl FindAllEmbeddings for PatternMatchingEmbedding {
             &mut results,
         );
 
-        for (_i, result) in results.clone().iter().enumerate() {
+        for result in results.clone() {
             let mut values = HashSet::new();
 
             for v in result.values() {
@@ -208,16 +181,16 @@ impl FindAllEmbeddings for PatternMatchingEmbedding {
 
             let mut embedding = Embedding { relation: embed, image: Default::default() };
 
-            for (k, v) in result {
+            for (k, v) in &result {
                 embedding.image.insert(*k, *v);
             }
 
             embeddings.push(embedding);
         }
 
-        // mosaic.make_snapshot_step("pm_created_bindings");
-
-        // mosaic.make_snapshot_step("pm_cleanup_finished");
+        for t in transient {
+            weave.delete(t);
+        }
 
         embeddings
     }
