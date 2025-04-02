@@ -2,8 +2,7 @@ use std::collections::{HashMap, HashSet};
 use array_tool::vec::Intersect;
 use itertools::Itertools;
 use ordered_multimap::ListOrderedMultimap;
-use crate::weave::FindAllEmbeddings;
-use crate::weave::{Cover, Embedding, Weave, Weaveable};
+use crate::weave::{FindEmbeddings, Cover, Embedding, Weave, Weaveable};
 
 #[derive(Debug, Default)]
 pub struct PatternMatchingEmbedding {
@@ -93,7 +92,7 @@ fn assign_candidate_and_test(
     }
 }
 
-impl FindAllEmbeddings for PatternMatchingEmbedding {
+impl FindEmbeddings for PatternMatchingEmbedding {
     fn find_all_embeddings(weave: &Weave, embed: usize, query: Cover, data: Cover) -> Vec<Embedding> {
         let mut embeddings = vec![];
         let mut state = find_candidates_by_degrees(weave, &query, &data);

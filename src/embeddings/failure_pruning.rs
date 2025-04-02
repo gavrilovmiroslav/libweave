@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hasher};
 use itertools::Itertools;
-use crate::weave::FindAllEmbeddings;
+use crate::weave::FindEmbeddings;
 use crate::weave::SearchEmbeddingContext;
 use crate::weave::{Cover, Embedding, Weave, Weaveable};
 
@@ -26,7 +26,7 @@ impl From<&'_ SearchEmbeddingContext<'_, '_>> for CandidateSet {
     }
 }
 
-impl FindAllEmbeddings for FailurePruningEmbedding {
+impl FindEmbeddings for FailurePruningEmbedding {
     fn find_all_embeddings(weave: &Weave, embed: usize, query: Cover, data: Cover) -> Vec<Embedding> {
         let context = SearchEmbeddingContext { weave, embed, query, data };
         let mut embeddings = Vec::<Embedding>::new();

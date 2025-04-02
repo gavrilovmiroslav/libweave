@@ -119,10 +119,11 @@ pub struct SearchEmbeddingContext<'w, 's> {
     pub(crate) data: Cover,
 }
 
-/// A trait for implementing embedding search, compatible with the `find_all_embeddings` function
-/// operating on `Weaveable<W>`. Returns a list of found `Embedding`s which themselves are just
-/// paired motifs that are equal or representative in the context of the similarity of their covers.
-pub trait FindAllEmbeddings {
+pub trait FindEmbeddings {
+    fn find_one_embedding(weave: &Weave, embed: MotifIdx, query: Cover, data: Cover) -> Option<Embedding> {
+        Self::find_all_embeddings(weave, embed, query, data).first().cloned()
+    }
+
     fn find_all_embeddings(weave: &Weave, embed: MotifIdx, query: Cover, data: Cover) -> Vec<Embedding>;
 }
 
@@ -821,27 +822,89 @@ pub trait Weaveable<W> {
     /// ```
     ///
     /// ```
-    ///         use libweave::weave::{Weave, Weaveable};
-    ///         let weave = &Weave::create();
-    ///         let a = weave.new_knot();
-    ///         let b = weave.new_knot();
-    ///         let c = weave.new_knot();
-    ///         let d = weave.new_knot();
-    ///         let _ = weave.new_arrow(b, a);
-    ///         let _ = weave.new_arrow(a, d);
-    ///         let _ = weave.new_arrow(b, c);
-    ///         let cover_a = weave.get_graph_cover(a);
-    ///         assert_eq!(cover_a.knots, vec![ a, b, c, d ]);
-    ///         let cover_b = weave.get_graph_cover(b);
-    ///         assert_eq!(cover_b.knots, vec![ a, b, c, d ]);
-    ///         assert_eq!(cover_a.hash, cover_b.hash);
-    ///         let flow_cover_a = weave.get_flow_graph_cover(a);
-    ///         assert_eq!(flow_cover_a.knots, vec![ a, d ]);
-    ///         let flow_cover_b = weave.get_flow_graph_cover(b);
-    ///         assert_eq!(flow_cover_b.knots, vec![ a, b, c, d ]);
-    ///         assert_ne!(flow_cover_a.hash, flow_cover_b.hash);
+    /// use libweave::weave::{Weave, Weaveable};
+    /// use libweave::embeddings::pattern_matching::PatternMatchingEmbedding;
+    /// 
+    /// let weave = &Weave::create();
+    /// let a = weave.new_knot();
+    /// let b = weave.new_knot();
+    /// let _ab = weave.new_arrow(a, b).unwrap();
+    ///
+    /// // data
+    /// let c = weave.new_knot();
+    /// let d = weave.new_knot();
+    /// let e = weave.new_knot();
+    /// let _cd = weave.new_arrow(c, d).unwrap();
+    /// let _ce = weave.new_arrow(c, e).unwrap();
+    /// let _de = weave.new_arrow(d, e).unwrap();
+    ///
+    /// // hoist
+    /// let t = weave.new_tether(a).unwrap();
+    /// let m = weave.new_mark(c).unwrap();
+    /// let embed = weave.new_arrow(t, m).unwrap();
+    ///
+    /// let matches = weave.find_all_embeddings::<PatternMatchingEmbedding>(embed);
+    /// assert!(matches.is_some());
+    /// let embeddings = matches.unwrap();
+    /// assert_eq!(embeddings.len(), 3);
+    /// assert_eq!(embeddings[0].image, vec![ (a, c), (b, d) ]);
+    /// assert_eq!(embeddings[1].image, vec![ (a, c), (b, e) ]);
+    /// assert_eq!(embeddings[2].image, vec![ (a, d), (b, e) ]);
     /// ```
-    fn find_all_embeddings<FE: FindAllEmbeddings>(&self, embed_relation: MotifIdx) -> Option<Vec<Embedding>>;
+    fn find_all_embeddings<FE: FindEmbeddings>(&self, embed_relation: MotifIdx) -> Option<Vec<Embedding>>;
+
+    /// Finds one embedding of one graph in another. The `embed_relation` needs to be a hoisted
+    /// arrow between two arbitrary representative nodes from the graphs. The source of this relation
+    /// needs to be the graph that we are looking to find, while the target is the graph we are
+    /// searching in. The `Embedding` structure will contain the `embed_relation` index, as well as
+    /// an `image` mapping between the motifs in the `source` and `target` graphs.
+    ///
+    /// Guarantees: the `embed_relation` connects two knots from two different graphs (checked by
+    /// creating the two `Cover` graphs and comparing their hashes). If the graphs are the same,
+    /// the result is `None`.
+    ///
+    /// # Example
+    ///
+    /// ```plaintext
+    ///                pre                                      post
+    ///  ---------------------------------------------------------------
+    ///       (t)>-----embed----->(m)               find_one_embedding(embed) = {
+    ///       ^                    \                    { a, c }, { b, d },
+    ///       |                     v               }
+    ///     [a]>-->[b]          /-<[c]>-\
+    ///                         |       |
+    ///                         v       v
+    ///                        [d]>--->[e]
+    /// ```
+    ///
+    /// ```
+    /// use libweave::weave::{Weave, Weaveable};
+    /// use libweave::embeddings::pattern_matching::PatternMatchingEmbedding;
+    ///
+    /// let weave = &Weave::create();
+    /// let a = weave.new_knot();
+    /// let b = weave.new_knot();
+    /// let _ab = weave.new_arrow(a, b).unwrap();
+    ///
+    /// // data
+    /// let c = weave.new_knot();
+    /// let d = weave.new_knot();
+    /// let e = weave.new_knot();
+    /// let _cd = weave.new_arrow(c, d).unwrap();
+    /// let _ce = weave.new_arrow(c, e).unwrap();
+    /// let _de = weave.new_arrow(d, e).unwrap();
+    ///
+    /// // hoist
+    /// let t = weave.new_tether(a).unwrap();
+    /// let m = weave.new_mark(c).unwrap();
+    /// let embed = weave.new_arrow(t, m).unwrap();
+    ///
+    /// let matches = weave.find_one_embedding::<PatternMatchingEmbedding>(embed);
+    /// assert!(matches.is_some());
+    /// let embeddings = matches.unwrap();
+    /// assert_eq!(embeddings.image, vec![ (a, c), (b, d) ]);
+    /// ```
+    fn find_one_embedding<FE: FindEmbeddings>(&self, embed_relation: MotifIdx) -> Option<Embedding>;
 }
 
 #[repr(C)]
@@ -1339,7 +1402,7 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
         Cover::from(visited.iter().sorted().cloned().collect::<Vec<usize>>())
     }
 
-    fn find_all_embeddings<FE: FindAllEmbeddings>(&self, embed_relation: usize) -> Option<Vec<Embedding>> {
+    fn find_all_embeddings<FE: FindEmbeddings>(&self, embed_relation: usize) -> Option<Vec<Embedding>> {
         if let Some((query_repr_index, data_repr_index))
             = self.get_hoist_endpoints(embed_relation) {
             let query_graph = self.get_graph_cover(query_repr_index);
@@ -1347,6 +1410,19 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
             if query_graph.hash == data_graph.hash { return None; }
 
             return Some(FE::find_all_embeddings(self, embed_relation, query_graph, data_graph));
+        }
+
+        None
+    }
+
+    fn find_one_embedding<FE: FindEmbeddings>(&self, embed_relation: MotifIdx) -> Option<Embedding> {
+        if let Some((query_repr_index, data_repr_index))
+            = self.get_hoist_endpoints(embed_relation) {
+            let query_graph = self.get_graph_cover(query_repr_index);
+            let data_graph = self.get_graph_cover(data_repr_index);
+            if query_graph.hash == data_graph.hash { return None; }
+
+            return FE::find_one_embedding(self, embed_relation, query_graph, data_graph);
         }
 
         None
@@ -1701,8 +1777,9 @@ mod tests {
         assert!(matches.is_some());
         let embeddings = matches.unwrap();
         assert_eq!(embeddings.len(), 3);
-
-        println!("{:?}", embeddings.iter());
+        assert_eq!(embeddings[0].image, vec![ (a, c), (b, d) ]);
+        assert_eq!(embeddings[1].image, vec![ (a, c), (b, e) ]);
+        assert_eq!(embeddings[2].image, vec![ (a, d), (b, e) ]);
     }
 
     #[test]
