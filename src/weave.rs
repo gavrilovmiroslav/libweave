@@ -4,7 +4,6 @@ use std::hash::{DefaultHasher, Hasher};
 use id_arena::{Arena, Id};
 use itertools::Itertools;
 use multimap::MultiMap;
-use crate::embedding::FindAllEmbeddings;
 
 /// Type alias for motif ID in libweave's internal arenas.
 pub type MotifId = Id<Motif>;
@@ -103,10 +102,28 @@ impl From<Vec<MotifIdx>> for Cover {
 /// saves the relation (in the form of the index of a hoisted arrow) that it is a part of, and offers
 /// an `image` containing mappings between nodes of two graphs. Created as part of `find_embeddings`
 /// in `Weaveable<W>`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, PartialOrd, Ord)]
 pub struct Embedding {
     pub relation: MotifIdx,
-    pub image: HashMap<MotifIdx, MotifIdx>,
+    pub image: Vec<(MotifIdx, MotifIdx)>,
+}
+
+/// A context for when searching for embeddings. Embedding searching (or subgraph pattern matching)
+/// is a very useful operation that traditionally can be done between two graph covers. This structure
+/// keeps all the relevant operational data within it, including the `Weave` in which it's happening,
+/// the search embedding process arrow `MotifIdx`, and both `Cover`s.
+pub struct SearchEmbeddingContext<'w, 's> {
+    pub(crate) weave: Weave<'w, 's>,
+    pub(crate) embed: MotifIdx,
+    pub(crate) query: Cover,
+    pub(crate) data: Cover,
+}
+
+/// A trait for implementing embedding search, compatible with the `find_all_embeddings` function
+/// operating on `Weaveable<W>`. Returns a list of found `Embedding`s which themselves are just
+/// paired motifs that are equal or representative in the context of the similarity of their covers.
+pub trait FindAllEmbeddings {
+    fn find_all_embeddings(weave: &Weave, embed: MotifIdx, query: Cover, data: Cover) -> Vec<Embedding>;
 }
 
 /// The main libweave API, mainly used by being implemented by `WeaveRef`, it defines ways to
@@ -309,6 +326,25 @@ pub trait Weaveable<W> {
     /// first one. Arrows are upheld by their source and target, marks and tethers are upheld by
     /// their source, and their target, respectively. Deleting a single motif might delete more than
     /// just that, depending on the structure.
+    ///
+    /// # Example
+    /// ```plaintext
+    ///            pre                        post
+    ///  -----------------------------------------------
+    ///                                       [a]
+    ///            [a]                    [a] <---(b)
+    ///        [a] <---(b)
+    /// ```
+    ///
+    /// ```
+    /// use libweave::weave::{Weave, Weaveable};
+    /// let weave = &Weave::create();
+    /// let a = weave.new_knot();
+    /// let b = weave.new_mark(a).unwrap_or(weave.bottom());
+    /// weave.delete(a);
+    /// assert!(!weave.exists(a));
+    /// assert!(!weave.exists(b));
+    /// ```
     fn delete(&self, target: MotifIdx) -> bool;
 
     /// Returns `true` if the `MotifId` has been allocated in storage, and has not been deleted.
@@ -777,10 +813,34 @@ pub trait Weaveable<W> {
     ///  ---------------------------------------------------------------
     ///       (t)>-----embed----->(m)               find_embeddings(embed) = {
     ///       ^                    \                    { { a, c }, { b, d } },
-    ///       |                     v                   { { a, c }, { b, e } }
-    ///     [a]>-->[b]      [e]<--<[c]>-->[d]       }
+    ///       |                     v                   { { a, c }, { b, e } },
+    ///     [a]>-->[b]          /-<[c]>-\               { { a, d }, { b, e } }
+    ///                         |       |           }
+    ///                         v       v
+    ///                        [d]>--->[e]
     /// ```
-    /// TODO (mg): add code example
+    ///
+    /// ```
+    ///         use libweave::weave::{Weave, Weaveable};
+    ///         let weave = &Weave::create();
+    ///         let a = weave.new_knot();
+    ///         let b = weave.new_knot();
+    ///         let c = weave.new_knot();
+    ///         let d = weave.new_knot();
+    ///         let _ = weave.new_arrow(b, a);
+    ///         let _ = weave.new_arrow(a, d);
+    ///         let _ = weave.new_arrow(b, c);
+    ///         let cover_a = weave.get_graph_cover(a);
+    ///         assert_eq!(cover_a.knots, vec![ a, b, c, d ]);
+    ///         let cover_b = weave.get_graph_cover(b);
+    ///         assert_eq!(cover_b.knots, vec![ a, b, c, d ]);
+    ///         assert_eq!(cover_a.hash, cover_b.hash);
+    ///         let flow_cover_a = weave.get_flow_graph_cover(a);
+    ///         assert_eq!(flow_cover_a.knots, vec![ a, d ]);
+    ///         let flow_cover_b = weave.get_flow_graph_cover(b);
+    ///         assert_eq!(flow_cover_b.knots, vec![ a, b, c, d ]);
+    ///         assert_ne!(flow_cover_a.hash, flow_cover_b.hash);
+    /// ```
     fn find_all_embeddings<FE: FindAllEmbeddings>(&self, embed_relation: MotifIdx) -> Option<Vec<Embedding>>;
 }
 
@@ -1639,6 +1699,30 @@ mod tests {
 
         let matches = weave.find_all_embeddings::<PatternMatchingEmbedding>(embed);
         assert!(matches.is_some());
-        println!("{:?}", matches.unwrap());
+        let embeddings = matches.unwrap();
+        assert_eq!(embeddings.len(), 3);
+
+        println!("{:?}", embeddings.iter());
+    }
+
+    #[test]
+    fn test_delete_cascades_and_reuses_ids() {
+        let weave = &Weave::create();
+        let a = weave.new_knot();
+        let b = weave.new_mark(a).unwrap_or(weave.bottom());
+        assert!(weave.is_mark(b).unwrap());
+        assert!(!weave.is_knot(b).unwrap());
+        weave.delete(a);
+        assert!(!weave.exists(a));
+        assert!(!weave.exists(b));
+        let c = weave.new_knot();
+        assert!(weave.exists(c));
+        assert!(a == c || b == c); // reuse happened
+        assert!(weave.is_knot(c).unwrap());
+        assert!(!weave.is_mark(c).unwrap());
+        let d = weave.new_knot();
+        assert!(weave.exists(d));
+        assert_ne!(c, d);
+        assert!(a == d || b == d); // reuse happened
     }
 }

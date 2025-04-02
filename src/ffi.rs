@@ -231,13 +231,14 @@ pub extern "C" fn weave_find_all_embeddings_fsg(weave: Weave, embed_relation: us
     if let Some(embeds) = embeddings {
         len = embeds.len();
 
-        for k in embeds.first().unwrap().image.keys() {
-            keys.push(*k);
+        for k in &embeds.first().unwrap().image {
+            keys.push(k.0);
         }
 
         for embed in &embeds {
             for k in &keys {
-                vals.push(*embed.image.get(k).unwrap());
+                let p = embed.image.iter().position(|&(a, _b)| a == *k).unwrap();
+                vals.push(embed.image[p].1);
             }
         }
     }

@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hasher};
 use itertools::Itertools;
-use crate::embedding::{FindAllEmbeddings, SearchEmbeddingContext};
+use crate::weave::FindAllEmbeddings;
+use crate::weave::SearchEmbeddingContext;
 use crate::weave::{Cover, Embedding, Weave, Weaveable};
 
 pub struct FailurePruningEmbedding;
@@ -13,7 +14,7 @@ struct CandidateSet {
 
 type DeadEndPattern = HashMap::<(usize, usize), HashSet<(usize, usize)>>;
 impl From<&'_ SearchEmbeddingContext<'_, '_>> for CandidateSet {
-    fn from(value: &crate::embedding::SearchEmbeddingContext) -> Self {
+    fn from(value: &SearchEmbeddingContext) -> Self {
         let mut hm: HashMap<usize, Vec<usize>> = HashMap::new();
         for k in value.query.knots.iter() {
             hm.insert(*k, value.data.knots.clone());
@@ -27,7 +28,7 @@ impl From<&'_ SearchEmbeddingContext<'_, '_>> for CandidateSet {
 
 impl FindAllEmbeddings for FailurePruningEmbedding {
     fn find_all_embeddings(weave: &Weave, embed: usize, query: Cover, data: Cover) -> Vec<Embedding> {
-        let context = crate::embedding::SearchEmbeddingContext { weave, embed, query, data };
+        let context = SearchEmbeddingContext { weave, embed, query, data };
         let mut embeddings = Vec::<Embedding>::new();
         let mut gamma = HashSet::<usize>::new();
         let mut delta = DeadEndPattern::new();
@@ -40,7 +41,7 @@ impl FindAllEmbeddings for FailurePruningEmbedding {
     }
 }
 
-fn search(id: u64, context: &crate::embedding::SearchEmbeddingContext, embeddings: &mut Vec<Embedding>,
+fn search(id: u64, context: &SearchEmbeddingContext, embeddings: &mut Vec<Embedding>,
           gamma: &mut HashSet<usize>, delta: &mut DeadEndPattern,
           partial_map: HashMap<usize, usize>, candidate_set: CandidateSet) -> HashSet<usize> {
     println!("SEARCH with ID = {}", id);
@@ -175,9 +176,9 @@ fn refine_candidate_set_with_edge_constraints(weave: Weave, candidate_set: &Cand
     }
 }
 
-fn create_embedding(context: &crate::embedding::SearchEmbeddingContext, partial_map: &HashMap<usize, usize>) -> Embedding {
+fn create_embedding(context: &SearchEmbeddingContext, partial_map: &HashMap<usize, usize>) -> Embedding {
     Embedding {
-        image: partial_map.clone(),
+        image: partial_map.iter().map(|(k, v)| (*k, *v)).collect(),
         relation: context.embed,
     }
 }

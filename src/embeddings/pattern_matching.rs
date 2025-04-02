@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use array_tool::vec::Intersect;
 use itertools::Itertools;
 use ordered_multimap::ListOrderedMultimap;
-use crate::embedding::FindAllEmbeddings;
+use crate::weave::FindAllEmbeddings;
 use crate::weave::{Cover, Embedding, Weave, Weaveable};
 
 #[derive(Debug, Default)]
@@ -24,7 +24,7 @@ fn find_candidates_by_degrees(weave: &Weave, query: &Cover, data: &Cover) -> Pat
         let loop_degree = weave.get_loop_degree(*target_node).unwrap();
         let in_degree = weave.get_in_degree(*target_node).unwrap() - loop_degree;
         let out_degree = weave.get_out_degree(*target_node).unwrap() - loop_degree;
-        
+
         for i in 0..=in_degree {
             in_degree_map.append(i, *target_node);
         }
@@ -44,7 +44,7 @@ fn find_candidates_by_degrees(weave: &Weave, query: &Cover, data: &Cover) -> Pat
             let loop_degree = loops.len();
             let in_degree = weave.get_in_degree(*pattern_node).unwrap() - loop_degree;
             let out_degree = weave.get_out_degree(*pattern_node).unwrap() - loop_degree;
-            
+
             let in_candidates = in_degree_map.get_all(&in_degree).collect_vec();
             let out_candidates = out_degree_map.get_all(&out_degree).collect_vec();
             let loop_candidates = loop_degree_map.get_all(&loop_degree).collect_vec();
@@ -81,7 +81,7 @@ fn assign_candidate_and_test(
 
         let candidates = find_candidates_by_degrees(weave, pattern, &traversal).candidates;
         let candidates_found = candidates.keys_len();
-        
+
         if candidates_found == bindings.len() {
             results.push(HashMap::from_iter(
                 bindings
@@ -182,8 +182,10 @@ impl FindAllEmbeddings for PatternMatchingEmbedding {
             let mut embedding = Embedding { relation: embed, image: Default::default() };
 
             for (k, v) in &result {
-                embedding.image.insert(*k, *v);
+                embedding.image.push((*k, *v));
             }
+
+            embedding.image.sort();
 
             embeddings.push(embedding);
         }
@@ -192,6 +194,7 @@ impl FindAllEmbeddings for PatternMatchingEmbedding {
             weave.delete(t);
         }
 
+        embeddings.sort();
         embeddings
     }
 }
