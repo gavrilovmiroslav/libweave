@@ -503,15 +503,15 @@ pub trait Weaveable<W> {
     /// let b = weave.new_knot();
     /// let c = weave.new_arrow(a, b).unwrap_or(weave.bottom());
     /// let d = weave.new_arrow(b, a).unwrap_or(weave.bottom());
-    /// assert_eq!(weave.get_connections(a, b), vec![ c ]);
+    /// assert_eq!(weave.get_arrows(a, b), vec![ c ]);
     /// let e = weave.new_arrow(a, b).unwrap_or(weave.bottom());
-    /// assert_eq!(weave.get_connections(a, b).into_iter().sorted().collect::<Vec<usize>>(), vec![ c, e ]);
+    /// assert_eq!(weave.get_arrows(a, b).into_iter().sorted().collect::<Vec<usize>>(), vec![ c, e ]);
     /// ```
-    fn get_connections(&self, source: MotifIdx, target: MotifIdx) -> Vec<MotifIdx>;
+    fn get_arrows(&self, source: MotifIdx, target: MotifIdx) -> Vec<MotifIdx>;
 
     /// Gets the loop connections between `index` and itself. Equivalent to:
-    /// `weave.get_connections(index, index)`.
-    fn get_loops(&self, index: MotifIdx) -> Vec<MotifIdx>;
+    /// `weave.get_arrows(index, index)`.
+    fn get_loop_arrows(&self, index: MotifIdx) -> Vec<MotifIdx>;
 
     /// Returns a vector of indices of all the arrows with `source` as source. If `source` is
     /// malformed, the result is an empty container. This function respects the `source -> target`
@@ -536,9 +536,9 @@ pub trait Weaveable<W> {
     /// let c = weave.new_arrow(a, b).unwrap_or(weave.bottom());
     /// let d = weave.new_arrow(b, a).unwrap_or(weave.bottom());
     /// let e = weave.new_arrow(a, b).unwrap_or(weave.bottom());
-    /// assert_eq!(weave.get_connections_from(a).into_iter().sorted().collect::<Vec<usize>>(), vec![ c, e ]);
+    /// assert_eq!(weave.get_arrows_from(a).into_iter().sorted().collect::<Vec<usize>>(), vec![ c, e ]);
     /// ```
-    fn get_connections_from(&self, source: MotifIdx) -> Vec<MotifIdx>;
+    fn get_arrows_from(&self, source: MotifIdx) -> Vec<MotifIdx>;
 
     /// Returns a vector of indices of all the arrows with `target` as target. If `source` is
     /// malformed, the result is an empty container. This function respects the `source -> target`
@@ -563,9 +563,41 @@ pub trait Weaveable<W> {
     /// let c = weave.new_arrow(a, b).unwrap_or(weave.bottom());
     /// let d = weave.new_arrow(b, a).unwrap_or(weave.bottom());
     /// let e = weave.new_arrow(a, b).unwrap_or(weave.bottom());
-    /// assert_eq!(weave.get_connections_to(b).into_iter().sorted().collect::<Vec<usize>>(), vec![ c, e ]);
+    /// assert_eq!(weave.get_arrows_to(b).into_iter().sorted().collect::<Vec<usize>>(), vec![ c, e ]);
     /// ```
-    fn get_connections_to(&self, target: MotifIdx) -> Vec<MotifIdx>;
+    fn get_arrows_to(&self, target: MotifIdx) -> Vec<MotifIdx>;
+
+    /// Returns a vector of indices of all the arrows with `index` as a source or a target. If
+    /// `source` is malformed, the result is an empty container. This function respects the
+    /// `source -> target` flow order when returning connections. It is exactly the same as getting
+    /// `get_arrows_from` and `get_arrows_to` on the same `index`.
+    ///
+    /// # Example
+    ///
+    /// ```plaintext
+    ///            pre                        post
+    ///  ------------------------------------------------------
+    ///       [a] >--c--> [b]          conns_to(b) = { c, d, e }
+    ///       [a] <--d--< [b]
+    ///       [a] >--e--> [b]
+    /// ```
+    ///
+    /// ```
+    /// use itertools::Itertools;
+    /// use libweave::weave::{Weave, Weaveable};
+    /// let weave = &Weave::create();
+    /// let a = weave.new_knot();
+    /// let b = weave.new_knot();
+    /// let c = weave.new_arrow(a, b).unwrap_or(weave.bottom());
+    /// let d = weave.new_arrow(b, a).unwrap_or(weave.bottom());
+    /// let e = weave.new_arrow(a, b).unwrap_or(weave.bottom());
+    /// assert_eq!(weave.get_ambi_arrows(b).into_iter().sorted().collect::<Vec<usize>>(), vec![ c, d, e ]);
+    /// ```
+    fn get_ambi_arrows(&self, index: MotifIdx) -> Vec<MotifIdx> {
+        let mut result: HashSet<MotifIdx> = HashSet::from_iter(self.get_arrows_from(index));
+        result.extend(self.get_arrows_to(index));
+        result.into_iter().collect()
+    }
 
     /// Gets the immediate neighbors of this motif. For the purposes of this function, a neighbor
     /// is any entity that is at the end of an **arrow** from another motif.
@@ -1066,8 +1098,8 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
                     delete_set.insert(motif);
                 }
 
-                queue.extend(self.get_connections_to(motif));
-                queue.extend(self.get_connections_from(motif));
+                queue.extend(self.get_arrows_to(motif));
+                queue.extend(self.get_arrows_from(motif));
                 queue.extend(self.get_marks(motif));
                 queue.extend(self.get_tethers(motif));
             }
@@ -1243,20 +1275,20 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
     }
 
     fn get_loop_degree(&self, index: usize) -> Option<usize> {
-        Some(self.get_connections(index, index).len())
+        Some(self.get_arrows(index, index).len())
     }
 
-    fn get_connections(&self, source: usize, target: usize) -> Vec<usize> {
+    fn get_arrows(&self, source: usize, target: usize) -> Vec<usize> {
         let internal = self.0.borrow();
         internal.motif_conns.get_vec(&(source, target)).cloned().unwrap_or(vec![]).to_vec()
     }
 
-    fn get_loops(&self, index: usize) -> Vec<usize> {
+    fn get_loop_arrows(&self, index: usize) -> Vec<usize> {
         let internal = self.0.borrow();
         internal.motif_conns.get_vec(&(index, index)).cloned().unwrap_or(vec![]).to_vec()
     }
 
-    fn get_connections_from(&self, source: usize) -> Vec<usize> {
+    fn get_arrows_from(&self, source: usize) -> Vec<usize> {
         let internal = self.0.borrow();
         let mut results = HashSet::new();
         if internal.motif_neighbors.contains_key(&source) {
@@ -1270,7 +1302,7 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
         results.into_iter().collect()
     }
 
-    fn get_connections_to(&self, target: usize) -> Vec<usize> {
+    fn get_arrows_to(&self, target: usize) -> Vec<usize> {
         let internal = self.0.borrow();
         let mut results = HashSet::new();
         if internal.motif_co_neighbors.contains_key(&target) {
@@ -1314,7 +1346,7 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
 
     fn get_hoisted_arrows(&self, source_index: usize, target_index: usize) -> Vec<usize> {
         self.get_tethers(source_index).iter()
-            .flat_map(|t| self.get_connections_from(*t))
+            .flat_map(|t| self.get_arrows_from(*t))
             .filter(|a| {
                 let tgt = self.get_target(*a);
                 self.is_mark(tgt).unwrap_or(false) && self.get_target(tgt) == target_index
@@ -1324,14 +1356,14 @@ impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
 
     fn get_hoisted_arrows_from(&self, index: usize) -> Vec<usize> {
         self.get_tethers(index).iter()
-            .flat_map(|t| self.get_connections_from(*t))
+            .flat_map(|t| self.get_arrows_from(*t))
             .filter(|a| self.is_mark(self.get_target(*a)).unwrap_or(false))
             .collect()
     }
 
     fn get_hoisted_arrows_to(&self, index: usize) -> Vec<usize> {
         self.get_marks(index).iter()
-            .flat_map(|t| self.get_connections_to(*t))
+            .flat_map(|t| self.get_arrows_to(*t))
             .filter(|a| self.is_tether(self.get_source(*a)).unwrap_or(false))
             .collect()
     }

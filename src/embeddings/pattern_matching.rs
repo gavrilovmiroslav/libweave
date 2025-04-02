@@ -39,7 +39,7 @@ fn find_candidates_by_degrees(weave: &Weave, query: &Cover, data: &Cover) -> Pat
         pattern_matching.loops.insert(*target_node, loop_degree);
 
         for pattern_node in &query.knots {
-            let loops = weave.get_loops(*pattern_node);
+            let loops = weave.get_loop_arrows(*pattern_node);
             let loop_degree = loops.len();
             let in_degree = weave.get_in_degree(*pattern_node).unwrap() - loop_degree;
             let out_degree = weave.get_out_degree(*pattern_node).unwrap() - loop_degree;

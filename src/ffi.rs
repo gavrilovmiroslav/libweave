@@ -146,17 +146,17 @@ pub extern "C" fn weave_are_connected(weave: Weave, source_index: usize, target_
 
 #[no_mangle]
 pub extern "C" fn weave_get_connections(weave: Weave, source_index: usize, target_index: usize) -> IdVec {
-    IdVec::from(weave.get_connections(source_index, target_index))
+    IdVec::from(weave.get_arrows(source_index, target_index))
 }
 
 #[no_mangle]
 pub extern "C" fn weave_get_connections_from(weave: Weave, source_index: usize) -> IdVec {
-    IdVec::from(weave.get_connections_from(source_index))
+    IdVec::from(weave.get_arrows_from(source_index))
 }
 
 #[no_mangle]
 pub extern "C" fn weave_get_connections_to(weave: Weave, target_index: usize) -> IdVec {
-    IdVec::from(weave.get_connections_to(target_index))
+    IdVec::from(weave.get_arrows_to(target_index))
 }
 
 #[no_mangle]
