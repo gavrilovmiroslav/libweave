@@ -1,5 +1,6 @@
 use std::os::raw::c_void;
 use crate::embeddings::failure_pruning::FailurePruningEmbedding;
+use crate::embeddings::pattern_matching::PatternMatchingEmbedding;
 use crate::weave::{MotifId, Weave, WeaveRef, Weaveable};
 
 #[repr(C)]
@@ -221,9 +222,46 @@ pub extern "C" fn weave_get_graph_cover(weave: Weave, knot_index: usize) -> IdCo
     }
 }
 
+#[repr(C)]
+pub enum FindEmbeddingAlgorithm {
+    FailurePruning = 0x01,
+    PatternMatching = 0x02,
+}
+
 #[no_mangle]
-pub extern "C" fn weave_find_all_embeddings_fsg(weave: Weave, embed_relation: usize) -> IdEmbeddings {
-    let embeddings = weave.find_all_embeddings::<FailurePruningEmbedding>(embed_relation);
+pub extern "C" fn weave_find_one_embedding(weave: Weave, embed_relation: usize, algo: FindEmbeddingAlgorithm) -> IdEmbeddings {
+    let embedding = match algo {
+        FindEmbeddingAlgorithm::FailurePruning => weave.find_one_embedding::<FailurePruningEmbedding>(embed_relation),
+        FindEmbeddingAlgorithm::PatternMatching => weave.find_one_embedding::<PatternMatchingEmbedding>(embed_relation)
+    };
+
+    let mut keys = Vec::<usize>::new();
+    let mut vals = Vec::<usize>::new();
+    let mut len = 0;
+    
+    if let Some(embed) = embedding {
+        len = 1;
+        for k in &embed.image {
+            keys.push(k.0);
+            let p = embed.image.iter().position(|&(a, _b)| a == k.0).unwrap();
+            vals.push(embed.image[p].1);
+        }
+    }
+
+    IdEmbeddings {
+        len,
+        keys: IdVec::from(keys),
+        vals: IdVec::from(vals),
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn weave_find_all_embeddings(weave: Weave, embed_relation: usize, algo: FindEmbeddingAlgorithm) -> IdEmbeddings {
+    let embeddings = match algo {
+        FindEmbeddingAlgorithm::FailurePruning => weave.find_all_embeddings::<FailurePruningEmbedding>(embed_relation),
+        FindEmbeddingAlgorithm::PatternMatching => weave.find_all_embeddings::<PatternMatchingEmbedding>(embed_relation)
+    };
+    
     let mut keys = Vec::<usize>::new();
     let mut vals = Vec::<usize>::new();
     let mut len = 0;
