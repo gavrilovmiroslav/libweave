@@ -1,3 +1,4 @@
+#![feature(str_from_raw_parts)]
 //! libweave: a library for structured programming
 //!
 //! libweave is a rust-based, no-unsafe, Cxx-compliant library for structured programming.
@@ -9,3 +10,4 @@
 pub mod weave;
 pub mod ffi;
 pub mod embeddings;
+mod ext;

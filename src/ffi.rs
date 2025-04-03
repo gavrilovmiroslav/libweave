@@ -1,9 +1,11 @@
 use std::os::raw::c_void;
 use crate::embeddings::failure_pruning::FailurePruningEmbedding;
 use crate::embeddings::pattern_matching::PatternMatchingEmbedding;
-use crate::weave::{MotifId, Weave, WeaveRef, Weaveable};
+use crate::ext::WeaveExtension;
+use crate::weave::{MotifId, MotifIdx, Weave, WeaveRef, Weaveable};
 
 #[repr(C)]
+#[derive(Debug)]
 pub struct IdVec {
     data: *mut c_void,
     len: usize,
@@ -30,6 +32,7 @@ pub struct IdCover {
 /// }                                                                     1     2     3
 ///
 #[repr(C)]
+#[derive(Debug)]
 pub struct IdEmbeddings {
     len: usize,
     keys: IdVec,
@@ -285,5 +288,92 @@ pub extern "C" fn weave_find_all_embeddings(weave: Weave, embed_relation: usize,
         len,
         keys: IdVec::from(keys),
         vals: IdVec::from(vals),
+    }
+}
+
+// not sure this will work.
+pub extern "C" fn weave_ext_to_motif<T, WE: WeaveExtension<T>>(t: T) -> MotifIdx {
+    WE::ext_to_motif(t)
+}
+
+pub extern "C" fn weave_motif_to_ext<T, WE: WeaveExtension<T>>(index: MotifIdx) -> T {
+    WE::motif_to_ext(index)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::slice;
+    use super::*;
+
+    #[test]
+    fn test_find_one_embedding() {
+        let weave = &Weave::create();
+
+        let a = weave.new_knot();
+        let b = weave.new_knot();
+        let _ab = weave.new_arrow(a, b).unwrap();
+
+        let c = weave.new_knot();
+        let d = weave.new_knot();
+        let e = weave.new_knot();
+        let _cd = weave.new_arrow(c, d).unwrap();
+        let _ce = weave.new_arrow(c, e).unwrap();
+        let _de = weave.new_arrow(d, e).unwrap();
+
+        let t = weave.new_tether(a).unwrap();
+        let m = weave.new_mark(c).unwrap();
+        let embed = weave.new_arrow(t, m).unwrap();
+
+        let matches = weave_find_one_embedding(weave, embed, FindEmbeddingAlgorithm::PatternMatching);
+        assert_eq!(matches.len, 3);
+        assert_eq!(matches.keys.len, 2);
+        assert_eq!(matches.vals.len, 6);
+
+        let key_data = unsafe { slice::from_raw_parts(matches.keys.data as *const usize, matches.keys.len) };
+        assert_eq!(key_data[0], 1);
+        assert_eq!(key_data[1], 2);
+
+        let value_data = unsafe { slice::from_raw_parts(matches.vals.data as *const usize, matches.vals.len) };
+        assert_eq!(value_data[0], 4);
+        assert_eq!(value_data[1], 5);
+    }
+    
+    #[test]
+    fn test_find_all_embeddings() {
+        let weave = &Weave::create();
+
+        let a = weave.new_knot();
+        let b = weave.new_knot();
+        let _ab = weave.new_arrow(a, b).unwrap();
+
+        let c = weave.new_knot();
+        let d = weave.new_knot();
+        let e = weave.new_knot();
+        let _cd = weave.new_arrow(c, d).unwrap();
+        let _ce = weave.new_arrow(c, e).unwrap();
+        let _de = weave.new_arrow(d, e).unwrap();
+
+        let t = weave.new_tether(a).unwrap();
+        let m = weave.new_mark(c).unwrap();
+        let embed = weave.new_arrow(t, m).unwrap();
+
+        let matches = weave_find_all_embeddings(weave, embed, FindEmbeddingAlgorithm::PatternMatching);
+        assert_eq!(matches.len, 3);
+        assert_eq!(matches.keys.len, 2);
+        assert_eq!(matches.vals.len, 6);
+
+        let key_data = unsafe { slice::from_raw_parts(matches.keys.data as *const usize, matches.keys.len) };
+        assert_eq!(key_data[0], 1);
+        assert_eq!(key_data[1], 2);
+
+        let value_data = unsafe { slice::from_raw_parts(matches.vals.data as *const usize, matches.vals.len) };
+        assert_eq!(value_data[0], 4);
+        assert_eq!(value_data[1], 5);
+        
+        assert_eq!(value_data[2], 4);
+        assert_eq!(value_data[3], 6);
+
+        assert_eq!(value_data[4], 5);
+        assert_eq!(value_data[5], 6);
     }
 }
