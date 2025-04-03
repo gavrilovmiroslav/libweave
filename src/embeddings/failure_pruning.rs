@@ -13,7 +13,7 @@ struct CandidateSet {
 }
 
 type DeadEndPattern = HashMap::<(usize, usize), HashSet<(usize, usize)>>;
-impl From<&'_ SearchEmbeddingContext<'_, '_>> for CandidateSet {
+impl From<&'_ SearchEmbeddingContext<'_>> for CandidateSet {
     fn from(value: &SearchEmbeddingContext) -> Self {
         let mut hm: HashMap<usize, Vec<usize>> = HashMap::new();
         for k in value.query.knots.iter() {

@@ -7,6 +7,6 @@
 //! 
 
 pub mod weave;
-pub mod ffi;
 pub mod embeddings;
 pub mod ext;
+pub mod ffi;

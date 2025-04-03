@@ -45,7 +45,7 @@ pub enum Motif {
 /// of a non-existent motif ID).
 #[repr(C)]
 #[derive(Clone, Debug)]
-pub struct WeaveInternal<'s> {
+pub struct WeaveInternal {
     pub(crate) motif_bottom: MotifIdx,
     motif_space: Arena<Motif>,
     motif_freelist: VecDeque<MotifId>,
@@ -55,10 +55,9 @@ pub struct WeaveInternal<'s> {
     motif_co_neighbors: MultiMap<MotifIdx, MotifIdx>,
     motif_tethers: MultiMap<MotifIdx, MotifIdx>,
     motif_marks: MultiMap<MotifIdx, MotifIdx>,
-    string_space: Arena<&'s str>,
 }
 
-impl<'s> Default for WeaveInternal<'s> {
+impl Default for WeaveInternal {
     fn default() -> Self {
         let mut motif_space: Arena<Motif> = Arena::default();
         let bottom = motif_space.alloc(Motif::Knot);
@@ -75,7 +74,6 @@ impl<'s> Default for WeaveInternal<'s> {
             motif_co_neighbors: Default::default(),
             motif_tethers: Default::default(),
             motif_marks: Default::default(),
-            string_space: Default::default(),
         }
     }
 }
@@ -112,8 +110,8 @@ pub struct Embedding {
 /// is a very useful operation that traditionally can be done between two graph covers. This structure
 /// keeps all the relevant operational data within it, including the `Weave` in which it's happening,
 /// the search embedding process arrow `MotifIdx`, and both `Cover`s.
-pub struct SearchEmbeddingContext<'w, 's> {
-    pub(crate) weave: Weave<'w, 's>,
+pub struct SearchEmbeddingContext<'w> {
+    pub(crate) weave: Weave<'w>,
     pub(crate) embed: MotifIdx,
     pub(crate) query: Cover,
     pub(crate) data: Cover,
@@ -943,11 +941,11 @@ pub trait Weaveable<W> {
 #[allow(improper_ctypes)]
 #[allow(improper_ctypes_definitions)]
 #[derive(Clone, Debug)]
-pub struct WeaveRef<'s>(pub(crate) Box<RefCell<WeaveInternal<'s>>>, pub(crate) MotifIdx);
+pub struct WeaveRef(pub(crate) Box<RefCell<WeaveInternal>>, pub(crate) MotifIdx);
 
-pub type Weave<'w, 's> = &'w WeaveRef<'s>;
+pub type Weave<'w> = &'w WeaveRef;
 
-impl<'s> WeaveRef<'s> {
+impl WeaveRef {
     pub fn bottom(&self) -> MotifIdx { self.1 }
 }
 
@@ -962,8 +960,8 @@ fn weave_alloc(internal: &mut RefMut<WeaveInternal>, motif: Motif) -> MotifId {
     }
 }
 
-impl<'w, 's> Weaveable<WeaveRef<'s>> for Weave<'w, 's> {
-    fn create() -> WeaveRef<'s> {
+impl<'w> Weaveable<WeaveRef> for Weave<'w> {
+    fn create() -> WeaveRef {
         let wv = Box::new(RefCell::new(WeaveInternal::default()));
         let bt = wv.as_ref().borrow().motif_bottom;
         WeaveRef(wv, bt)

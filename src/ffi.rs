@@ -63,7 +63,7 @@ impl From<Vec<usize>> for IdVec {
 #[no_mangle]
 #[allow(improper_ctypes)]
 #[allow(improper_ctypes_definitions)]
-pub extern "C" fn weave_create<'s>() -> WeaveRef<'s> {
+pub extern "C" fn weave_create() -> WeaveRef {
     Weave::create()
 }
 
@@ -292,7 +292,6 @@ pub extern "C" fn weave_find_all_embeddings(weave: Weave, embed_relation: usize,
     }
 }
 
-// not sure this will work.
 pub extern "C" fn weave_ext_to_motif<T: Debug + Clone + Copy, WE: WeaveExtension<T>>(t: T) -> MotifIdx {
     WE::ext_to_motif(t)
 }
