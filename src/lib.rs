@@ -9,4 +9,4 @@
 pub mod weave;
 pub mod ffi;
 pub mod embeddings;
-mod ext;
+pub mod ext;

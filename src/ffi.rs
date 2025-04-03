@@ -325,9 +325,9 @@ mod tests {
         let embed = weave.new_arrow(t, m).unwrap();
 
         let matches = weave_find_one_embedding(weave, embed, FindEmbeddingAlgorithm::PatternMatching);
-        assert_eq!(matches.len, 3);
+        assert_eq!(matches.len, 1);
         assert_eq!(matches.keys.len, 2);
-        assert_eq!(matches.vals.len, 6);
+        assert_eq!(matches.vals.len, 2);
 
         let key_data = unsafe { slice::from_raw_parts(matches.keys.data as *const usize, matches.keys.len) };
         assert_eq!(key_data[0], 1);
@@ -337,7 +337,7 @@ mod tests {
         assert_eq!(value_data[0], 4);
         assert_eq!(value_data[1], 5);
     }
-    
+
     #[test]
     fn test_find_all_embeddings() {
         let weave = &Weave::create();
@@ -369,7 +369,7 @@ mod tests {
         let value_data = unsafe { slice::from_raw_parts(matches.vals.data as *const usize, matches.vals.len) };
         assert_eq!(value_data[0], 4);
         assert_eq!(value_data[1], 5);
-        
+
         assert_eq!(value_data[2], 4);
         assert_eq!(value_data[3], 6);
 
