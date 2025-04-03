@@ -1,3 +1,4 @@
+use std::fmt::Debug;
 use std::os::raw::c_void;
 use crate::embeddings::failure_pruning::FailurePruningEmbedding;
 use crate::embeddings::pattern_matching::PatternMatchingEmbedding;
@@ -292,11 +293,11 @@ pub extern "C" fn weave_find_all_embeddings(weave: Weave, embed_relation: usize,
 }
 
 // not sure this will work.
-pub extern "C" fn weave_ext_to_motif<T, WE: WeaveExtension<T>>(t: T) -> MotifIdx {
+pub extern "C" fn weave_ext_to_motif<T: Debug + Clone + Copy, WE: WeaveExtension<T>>(t: T) -> MotifIdx {
     WE::ext_to_motif(t)
 }
 
-pub extern "C" fn weave_motif_to_ext<T, WE: WeaveExtension<T>>(index: MotifIdx) -> T {
+pub extern "C" fn weave_motif_to_ext<T: Debug + Clone + Copy, WE: WeaveExtension<T>>(index: MotifIdx) -> T {
     WE::motif_to_ext(index)
 }
 
